@@ -74,18 +74,27 @@ Full spec: `docs/workflow-specification.md` (Workflows 1–9). Read it before de
 - Proprietary campaign methodology stays in the separate `profile-drive-os` repo — never here.
   This repo transfers to UCC.
 
-## Current build status (Sep 18, 2026)
+## Current build status (Sep 20, 2026)
 
+See `docs/build-status.md` for full detail.
+
+**Completed:**
 - [x] Audit complete; deposit received; $3k build, $1.5k/$1.5k terms
 - [x] Slack #b2b-inquiries channel created
-- [ ] B2B routing: BD webhook → GHL inbound webhook → If/Else on inquirer_type →
-      pipelines (B2B Member Support, Prospective Doctors) + Slack post — IN PROGRESS
-- [ ] D2C reminders: BD lead-submission webhook → GHL tag `pending-lead` → 24/48/72
-      workflow (stop condition on accept is the open design problem — BD accept event
-      needed, else "disregard if handled" copy in v1)
+- [x] B2B routing LIVE: BD "Contact Us Form Submitted" webhook → GHL Directory workflow
+      → pipelines (B2B Member Support, Prospective Doctors) + Slack post
+- [x] BD event discovery: Lead Submitted, Lead Accept/Decline, One-Time Purchase all
+      available as real-time webhooks (smart-list webhooks are batch-only — dead end)
+- [x] D2C reminder copy drafted (24hr, 48hr, 72hr expiration)
+
+**In progress:**
+- [ ] D2C reminders: Repoint BD Lead Submitted webhook to B2C account → build GHL
+      reminder workflow with Lead Accept as stop condition — BUILDING NOW
+- [ ] All system copy sent for Billy approval
+
+**Not started:**
 - [ ] jordan template fix
-- [ ] All system copy drafted → Billy approval
 - [ ] Expiration handling + patient loop
-- [ ] ZIP fallback cascade (Workflow 4)
+- [ ] ZIP fallback cascade (Workflow 4) — BLOCKED on Maximum Matches decision
 - [ ] Tracking view / exception queue (Workflow 8–9)
 - [ ] Handover docs + ownership transfer
