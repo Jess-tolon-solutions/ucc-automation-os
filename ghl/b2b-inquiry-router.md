@@ -20,13 +20,16 @@ contacts into the appropriate pipeline and posts to Slack.
 form submission where `inquirer_type` is NOT "Potential Patient looking for a
 doctor" (patient inquiries route to the D2C lane separately).
 
-**Payload fields used:**
-- `inquirer_type` — classification from form dropdown
-- `name` — submitter name
-- `email` — submitter email
-- `phone` — submitter phone (optional)
-- `message` — free-text message field
-- `zip_code` — optional, captured for patient routing but passed through here
+**Payload fields (REAL, verified Sep 23 2026):**
+- `inquirer_type` — short code (e.g., `existing_doctor`)
+- `inquirer_type_values_stringify` — full text (e.g., "I am an existing UpperCervicalCare.com Doctor/Member")
+- `yourname` — submitter name (NOT `name`)
+- `inquiry_email` — submitter email (NOT `email`)
+- `phone` — submitter phone
+- `comments` — free-text message (NOT `message`)
+- `zip_code` — submitter ZIP
+
+See `bd-contact-form-schema.md` for full schema.
 
 ---
 
@@ -38,7 +41,9 @@ doctor" (patient inquiries route to the D2C lane separately).
 
 **Actions:**
 1. **Create/Update Contact**
-   - Map `name`, `email`, `phone` to contact fields
+   - Email ← `{{inboundWebhookRequest.inquiry_email}}`
+   - Name ← `{{inboundWebhookRequest.yourname}}`
+   - Phone ← `{{inboundWebhookRequest.phone}}`
 
 2. **Add Tag:** `b2b-member-support`
 
@@ -106,7 +111,7 @@ Fires on all three branches. Posts to `#b2b-inquiries` for Constansa.
 
 **Webhook URL:** *(Slack incoming webhook — do not commit)*
 
-**Payload format:**
+**Payload format (use real BD field names):**
 ```json
 {
   "text": "[Branch Label] New B2B Inquiry",
@@ -115,7 +120,7 @@ Fires on all three branches. Posts to `#b2b-inquiries` for Constansa.
       "type": "section",
       "text": {
         "type": "mrkdwn",
-        "text": "*Name:* {{contact.name}}\n*Email:* {{contact.email}}\n*Type:* {{inquirer_type}}\n*Message:* {{message}}"
+        "text": "*Name:* {{inboundWebhookRequest.yourname}}\n*Email:* {{inboundWebhookRequest.inquiry_email}}\n*Type:* {{inboundWebhookRequest.inquirer_type_values_stringify}}\n*Message:* {{inboundWebhookRequest.comments}}"
       }
     }
   ]
@@ -154,4 +159,4 @@ you'll match all three options.
 
 ---
 
-*Last updated: Sep 20, 2026*
+*Last updated: Sep 23, 2026*

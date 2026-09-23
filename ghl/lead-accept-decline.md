@@ -10,7 +10,7 @@ active reminder sequence, and branches on the action taken.
 
 **Owner:** Billy (D2C/patient leads)
 
-**Status:** DRAFT — skeleton built, pending end-to-end test
+**Status:** DRAFT — real payload captured, field names verified, ready to update GHL
 
 ---
 
@@ -22,16 +22,20 @@ active reminder sequence, and branches on the action taken.
 
 **Source:** BD Developer Hub → Lead Accept / Decline event (single event, single URL)
 
-**Payload fields (discovered via inbound webhook custom values):**
-| Field | GHL Custom Value | Notes |
-|-------|------------------|-------|
-| `Lead Id` | `{{lead_id}}` | Matches the lead from submission; enables per-lead opportunities |
-| `Doctor Id` | `{{doctor_id}}` | BD member ID |
-| `Doctor Email` | `{{doctor_email}}` | For contact lookup |
-| `Doctor First Name` | `{{doctor_first_name}}` | For contact record |
-| `Action` | `{{action}}` | Value TBD — test with real decline to confirm exact string |
-| `Action Timestamp` | `{{action_timestamp}}` | ISO timestamp |
-| `Plan Id` | `{{plan_id}}` | Tier — enables branch logic if needed |
+**Payload fields (REAL, verified Sep 23 2026 via ZZTEST decline):**
+
+| What | BD Field | GHL Variable |
+|------|----------|--------------|
+| Action | `lead_action` | `{{inboundWebhookRequest.lead_action}}` |
+| Doctor email | `user.email` | `{{inboundWebhookRequest.user.email}}` |
+| Doctor first name | `user.first_name` | `{{inboundWebhookRequest.user.first_name}}` |
+| Doctor last name | `user.last_name` | `{{inboundWebhookRequest.user.last_name}}` |
+| Lead ID | `lead.lead_id` | `{{inboundWebhookRequest.lead.lead_id}}` |
+| Plan ID | `user.subscription_id` | `{{inboundWebhookRequest.user.subscription_id}}` |
+| Patient name | `lead.lead_name` | `{{inboundWebhookRequest.lead.lead_name}}` |
+| Patient email | `lead.lead_email` | `{{inboundWebhookRequest.lead.lead_email}}` |
+
+See `bd-accept-decline-schema.md` for full payload documentation.
 
 ---
 
@@ -42,8 +46,9 @@ active reminder sequence, and branches on the action taken.
 **Action:** Create/Update Contact
 
 **Field mapping:**
-- Email ← `{{doctor_email}}`
-- First Name ← `{{doctor_first_name}}`
+- Email ← `{{inboundWebhookRequest.user.email}}`
+- First Name ← `{{inboundWebhookRequest.user.first_name}}`
+- Last Name ← `{{inboundWebhookRequest.user.last_name}}`
 
 Creates the contact if new, or finds existing by email. Must come first so
 subsequent actions have a contact to operate on.
@@ -73,11 +78,11 @@ workflow removal had edge cases.
 
 ---
 
-### 4. Branch: If/Else on Action field
+### 4. Branch: If/Else on lead_action field
 
 #### Branch A: Accept
 
-**Condition:** `Action` contains `accept`
+**Condition:** `{{inboundWebhookRequest.lead_action}}` contains `accept`
 
 **Actions:**
 
@@ -93,7 +98,7 @@ workflow removal had edge cases.
 
 #### Branch B: Decline
 
-**Condition:** `Action` contains `decline`
+**Condition:** `{{inboundWebhookRequest.lead_action}}` contains `decline`
 
 **Actions:**
 
@@ -109,9 +114,7 @@ workflow removal had edge cases.
    - THEN trigger 50-mile fallback cascade to next doctor
    - *Not built yet — add action here when Workflow 4 is ready*
 
-**Note:** Exact `Action` field values TBD — need to test with real BD decline via
-Login as Member to see what BD actually sends (might be "accept"/"decline",
-"Accepted"/"Declined", or something else).
+**Note:** Confirmed `lead_action` values are `"accept"` and `"decline"` (lowercase).
 
 ---
 
@@ -153,4 +156,4 @@ Login as Member to see what BD actually sends (might be "accept"/"decline",
 
 ---
 
-*Last updated: Sep 20, 2026*
+*Last updated: Sep 23, 2026*
