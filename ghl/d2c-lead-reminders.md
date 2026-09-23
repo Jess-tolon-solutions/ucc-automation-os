@@ -9,8 +9,32 @@ reminder cadence for Annual/Unverified doctors who haven't responded to a patien
 
 **Owner:** Billy (D2C/patient leads)
 
-**Status:** DRAFT — rebuilt in correct B2C account (Directory copy deleted), pending
-Billy's copy approval and end-to-end test with Accept/Decline handler
+**Status:** DRAFT — testing tier-annual tag check
+
+---
+
+## CRITICAL: Real BD Field Names
+
+**Source:** Live capture from BD webhook via ZZTEST doctor, Sep 22, 2026
+
+BD's Lead Submitted (`bootstrap_get_match`) payload uses these EXACT field names:
+
+| BD Field | Maps to GHL Field | Notes |
+|----------|-------------------|-------|
+| `member_email` | Email | Doctor's email — used for contact lookup |
+| `member_first_name` | First Name | Doctor's first name |
+| `member_last_name` | Last Name | Doctor's last name |
+| `member_phone_number` | Phone | Doctor's phone |
+| `lead_name` | (Opportunity) | Patient's name |
+| `lead_email` | (Opportunity) | Patient's email |
+| `lead_phone` | (Opportunity) | Patient's phone |
+| `lead_message` | (Opportunity) | Patient's message |
+| `lead_location` | (Opportunity) | Patient's ZIP/location |
+| `lead_id` | (Opportunity) | BD's unique lead ID |
+| `lead_match_id` | (Opportunity) | Match record ID |
+
+**IMPORTANT:** There is NO `plan_id` in the BD payload. Tier branching MUST use
+the `tier-annual` contact tag, pre-applied via member export sync.
 
 ---
 
@@ -18,19 +42,17 @@ Billy's copy approval and end-to-end test with Accept/Decline handler
 
 Two GHL workflows in B2C account:
 
-1. **Lead Submitted Workflow** (this doc) — receives new leads, creates opportunity,
-   branches by tier, starts reminders for Annual/Unverified
-2. **Lead Accept/Decline Workflow** (`lead-accept-decline.md`) — receives doctor
-   response, stops reminders, updates opportunity stage
+1. **Lead Reminder Sequence** (this doc) — receives new leads, checks tier tag,
+   starts reminders for Annual/Unverified
+2. **Lead Accept/Decline Handler** (`lead-accept-decline.md`) — receives doctor
+   response, stops reminders, updates tags
 
-**Data model:** Contacts are doctors (one per doctor, receives reminders). Opportunities
-are leads (one per inquiry, tracks lifecycle). See decision log entry 2026-09-20.
+**Data model:** Contacts are doctors (one per doctor, receives reminders).
+Tags on Contact control workflow enrollment. See decision log entry 2026-09-20.
 
 ---
 
-## Lead Submitted Workflow
-
-### Trigger
+## Trigger
 
 **Type:** Inbound Webhook
 
@@ -38,240 +60,194 @@ are leads (one per inquiry, tracks lifecycle). See decision log entry 2026-09-20
 
 **Source:** BD Developer Hub → Lead Submitted (`bootstrap_get_match`) event
 
-**BD Configuration Required:**
-- In BD Admin → Developer Hub → Webhooks
-- Event: Lead Submitted
-- Currently pointing at Directory account — **repoint to this B2C webhook URL**
+**Content-Type from BD:** `application/x-www-form-urlencoded` (NOT JSON)
 
-**Payload fields (from BD):**
-| Field | Source | Notes |
-|-------|--------|-------|
-| `lead_id` | BD system | Unique inquiry ID |
-| `doctor_id` | BD system | Matched doctor's BD member ID |
-| `doctor_email` | BD system | Doctor's email for GHL contact lookup |
-| `doctor_first_name` | BD system | For email personalization |
-| `plan_id` | BD system | Membership tier — determines branch |
-| `patient_name` | Form field | |
-| `patient_email` | Form field | |
-| `patient_phone` | Form field | Optional |
-| `patient_message` | Form field | |
-| `patient_zip` | Form field | Required for Annual/Unverified |
-| `submitted_at` | System | ISO timestamp |
+**User-Agent:** `BD-Software`
 
 ---
 
-### Branch: If/Else on plan_id
+## Workflow Actions (in order)
 
-### Step 1: Create Opportunity (All Branches)
+### Step 1: Create/Update Contact
 
-**Action:** Create Opportunity
+**Action:** Create/Update Contact
 
-**Pipeline:** Patient Leads
+**Purpose:** Find or create the doctor as a GHL contact
 
-**Opportunity name:** `Lead {{lead_id}} - {{patient_name}}`
+**Field mappings:**
+- Email ← `{{Inbound Webhook Trigger.member_email}}`
+- First Name ← `{{Inbound Webhook Trigger.member_first_name}}`
 
-**Fields:**
-- `lead_id`: `{{lead_id}}`
-- `doctor_id`: `{{doctor_id}}`
-- `patient_name`: `{{patient_name}}`
-- `patient_email`: `{{patient_email}}`
-- `patient_phone`: `{{patient_phone}}`
-- `patient_zip`: `{{patient_zip}}`
-- `submitted_at`: `{{submitted_at}}`
-- `plan_id`: `{{plan_id}}`
-
-This is the per-inquiry record per Workflow 8. One opportunity per lead, tracks
-through Awaiting Decision → Accepted/Declined/Expired.
+**Critical:** The email field is the lookup key. If the email from BD doesn't
+EXACTLY match an existing contact's email (including case), GHL creates a new
+contact without the `tier-annual` tag.
 
 ---
 
-### Step 2: Branch on plan_id
+### Step 2: If/Else — Check tier tag
 
-#### Branch 1: Level 2+ (Full Access)
+**Action:** If/Else
 
-**Condition:** `plan_id` in `2, 18, 19, 23, 26, 27, 29, 33`
+**Condition:** Contact has tag `tier-annual`
 
-**Actions:**
-1. **Create/Update Contact** (doctor as contact)
-   - Lookup by `doctor_email`
-   - Tag: `level2-lead-received`
-   - Custom field `last_lead_date`: `{{submitted_at}}`
+This checks whether the contact (found/created in Step 1) has the pre-applied
+`tier-annual` tag. This tag was bulk-applied to all Annual/Unverified members
+via API on Sep 22, 2026.
 
-2. **Update Opportunity Stage:** Delivered
+**Branch YES (Annual/Unverified doctors):** Continue to Step 3
 
-3. **No reminder sequence** — Level 2+ leads don't expire
-
-4. *(Optional future)* **Send hygiene nudge** at day 5 asking "did you follow up?"
+**Branch NO (Level 2+ doctors or new contacts):** END — no reminders for Level 2+
 
 ---
 
-#### Branch 2: Annual/Unverified ($50 Flow)
+### Step 3: Add Tag `pending-lead`
 
-**Condition:** `plan_id` in `3, 31`
+**Action:** Add Tag
 
-**Actions:**
-1. **Create/Update Contact** (doctor as contact)
-   - Lookup by `doctor_email`
-   - Tag: `pending-lead` ← THIS IS THE STOP CONDITION TAG
-   - Tag: `annual-unverified`
-   - Custom field `pending_lead_id`: `{{lead_id}}`
-   - Custom field `pending_lead_submitted`: `{{submitted_at}}`
+**Tag:** `pending-lead`
 
-2. **Update Opportunity Stage:** Awaiting Decision
-
-3. **Start Reminder Sequence** (see Reminder Sequence section below)
+This tag is the stop condition for the reminder sequence. When the Accept/Decline
+Handler receives a doctor response, it removes this tag, which stops the reminders.
 
 ---
 
-#### Else Branch
+### Step 4: Wait 24 hours
 
-**Condition:** `plan_id` not in either list
+**Action:** Wait
 
-**Actions:**
-1. **Create/Update Contact**
-   - Tag: `lead-unknown-tier`
-
-2. **Update Opportunity Stage:** Exception
-
-3. *(Future)* Post to exception Slack channel
+**Duration:** 24 hours
 
 ---
 
-## Reminder Sequence (Annual/Unverified Branch Only)
+### Step 5: Send 24hr Reminder
 
-Executes as a wait-based sequence within the workflow. The `pending-lead` tag is the
-stop condition — if removed (by Lead Accept or Lead Decline workflows), the contact
-exits the sequence.
+**Action:** Send Email + SMS
 
-### Sequence Steps
-
-```
-[Contact enters with pending-lead tag]
-        │
-        ▼
-    Wait 24 hours
-        │
-        ▼
-    If: Contact has tag "pending-lead"
-        │
-        ├─ Yes → Send 24hr Reminder (email + SMS)
-        │           │
-        │           ▼
-        │       Wait 24 hours
-        │           │
-        │           ▼
-        │       If: Contact has tag "pending-lead"
-        │           │
-        │           ├─ Yes → Send 48hr Reminder (email + SMS)
-        │           │           │
-        │           │           ▼
-        │           │       Wait 24 hours
-        │           │           │
-        │           │           ▼
-        │           │       If: Contact has tag "pending-lead"
-        │           │           │
-        │           │           ├─ Yes → Send 72hr Expiration Notice
-        │           │           │           │
-        │           │           │           ▼
-        │           │           │       Remove tag "pending-lead"
-        │           │           │       Add tag "lead-expired"
-        │           │           │       Move pipeline to "Expired"
-        │           │           │       [Trigger patient expiration flow - future]
-        │           │           │
-        │           │           └─ No → Exit (already responded)
-        │           │
-        │           └─ No → Exit (already responded)
-        │
-        └─ No → Exit (already responded)
-```
-
-### Email Templates
-
-**24hr Reminder:** `doctor-reminder-24hr`
+**Email template:** `doctor-reminder-24hr`
 - Subject: A patient is waiting to hear from you
 - Copy: See `copy/doctor-reminder-24hr.md`
 
-**48hr Reminder:** `doctor-reminder-48hr`
+**SMS template:** `UpperCervicalCare.com: You have a patient inquiry from yesterday
+still waiting for a response. Log in to view and respond: [dashboard_link]`
+
+---
+
+### Step 6: Wait 24 hours
+
+**Action:** Wait
+
+**Duration:** 24 hours
+
+---
+
+### Step 7: Send 48hr Reminder
+
+**Action:** Send Email + SMS
+
+**Email template:** `doctor-reminder-48hr`
 - Subject: Patient inquiry expires soon
 - Copy: See `copy/doctor-reminder-48hr.md`
 
-**72hr Expiration:** `doctor-reminder-72hr`
+**SMS template:** `UpperCervicalCare.com: Your patient inquiry expires in 24 hours.
+Log in to respond before it closes: [dashboard_link]`
+
+---
+
+### Step 8: Wait 24 hours
+
+**Action:** Wait
+
+**Duration:** 24 hours
+
+---
+
+### Step 9: Send 72hr Expiration Notice
+
+**Action:** Send Email + SMS
+
+**Email template:** `doctor-reminder-72hr`
 - Subject: Patient inquiry expired
 - Copy: See `copy/doctor-reminder-72hr.md`
 
-### SMS Templates
-
-**24hr:** `UpperCervicalCare.com: You have a patient inquiry from yesterday still waiting for a response. Log in to view and respond: {{dashboard_link}}`
-
-**48hr:** `UpperCervicalCare.com: Your patient inquiry expires in 24 hours. Log in to respond before it closes: {{dashboard_link}}`
-
-**72hr:** `UpperCervicalCare.com: Your patient inquiry has expired due to no response. Contact us if you have questions about your lead settings.`
-
-### Variable: dashboard_link
-
-Static URL to UCC doctor dashboard login. BD does not expose per-lead deep links in
-webhook payload.
-
-**Value:** `https://uppercervicalcare.com/members/` *(confirm exact URL)*
+**SMS template:** `UpperCervicalCare.com: Your patient inquiry has expired due to
+no response. Contact us if you have questions about your lead settings.`
 
 ---
 
-## Pipeline: Patient Leads
+### Step 10: Remove Tag `pending-lead`
 
-**Stages:**
-1. Awaiting Decision (Annual/Unverified pending response)
-2. Delivered (Level 2+ immediate delivery)
-3. Accepted
-4. Declined
-5. Expired
-6. Exception
+**Action:** Remove Tag
 
-Opportunities (leads) move through these stages. The Accept/Decline workflow
-(`lead-accept-decline.md`) handles stage transitions on doctor response.
+**Tag:** `pending-lead`
 
 ---
 
-## Testing Checklist (Reminder Sequence Only)
+### Step 11: Add Tag `lead-expired`
 
-- [ ] Submit test lead to Level 2+ doctor profile:
-  - [ ] Opportunity created in Patient Leads pipeline
-  - [ ] Opportunity stage = Delivered
-  - [ ] No reminder sequence starts
-- [ ] Submit test lead to Annual/Unverified doctor profile:
-  - [ ] Opportunity created in Patient Leads pipeline
-  - [ ] Opportunity stage = Awaiting Decision
-  - [ ] Contact created with `pending-lead` tag
-  - [ ] 24hr reminder fires after wait
-  - [ ] 48hr reminder fires after wait
-  - [ ] 72hr expiration fires after wait
-  - [ ] Tags update correctly at expiration
-  - [ ] Opportunity moves to Expired stage
-- [ ] Test unknown plan_id:
-  - [ ] Opportunity stage = Exception
-  - [ ] Contact tagged `lead-unknown-tier`
+**Action:** Add Tag
 
-See `lead-accept-decline.md` for Accept/Decline workflow testing.
+**Tag:** `lead-expired`
 
 ---
 
-## BD Webhook Configuration
+### Step 12: END
 
-1. Log into BD Admin → Developer Hub → Webhooks
-2. Find existing "Lead Submitted" webhook (currently pointing at Directory)
-3. Update destination URL to this B2C workflow's inbound webhook URL
-4. Test with BD's webhook test tool before going live
+---
+
+## Debugging the tier-annual Check
+
+If the tier-annual condition evaluates to NO (Add Tag skipped), check:
+
+### 1. Email Mismatch
+
+The most likely cause. Create/Update Contact creates a NEW contact if:
+- The email from BD has different casing (emails are case-sensitive in lookup)
+- The email from BD has leading/trailing whitespace
+- The email from BD is a different address than the tagged contact
+
+**To verify:** Check the workflow execution log → look at the Create/Update Contact
+step → see what email value was received and whether it matched an existing contact.
+
+### 2. ZZTEST Doctor Configuration
+
+Confirm in BD Admin → Members:
+- The ZZTEST doctor's email is EXACTLY `jessica@tolonsolutions.ai` (no typos)
+- This matches the GHL contact that has the `tier-annual` tag
+
+### 3. Workflow Execution Log
+
+In GHL → Automation → Workflows → Lead Reminder Sequence:
+1. Click on a recent execution
+2. Expand "Create/Update Contact" — see what contact was found/created
+3. Expand "If/Else" — see what condition was evaluated and why it failed
+
+### 4. Contact Record Check
+
+Go to GHL Contacts → search for `jessica@tolonsolutions.ai`:
+- Verify the contact exists
+- Verify it has the `tier-annual` tag (exact spelling)
+- Check if there are duplicate contacts with similar emails
+
+---
+
+## Variable: dashboard_link
+
+Static URL to UCC doctor dashboard login. BD does not expose per-lead deep links.
+
+**Value:** `https://uppercervicalcare.com/members/`
 
 ---
 
 ## Related Files
 
+- `ghl/canonical-workflows.md` — Canonical workflow design reference
+- `ghl/bd-payload-schema.md` — Real BD payload field names
 - `ghl/lead-accept-decline.md` — Accept/Decline workflow (stops reminders)
 - `copy/doctor-reminder-24hr.md` — 24hr reminder copy
 - `copy/doctor-reminder-48hr.md` — 48hr reminder copy
 - `copy/doctor-reminder-72hr.md` — 72hr expiration copy
-- `bd/webhooks.md` — BD webhook configuration reference
-- `docs/workflow-specification.md` — Workflows 2, 3, 8
+- `docs/decision-log.md` — Sep 22 incident note and corrections
 
 ---
 
-*Last updated: Sep 20, 2026*
+*Last updated: Sep 22, 2026*

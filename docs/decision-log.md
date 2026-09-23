@@ -2,16 +2,54 @@
 
 Dated record of non-obvious choices. Newest first.
 
-## 2026-09-20 — BD Lead Accept/Decline payload schema confirmed
-Wired the Lead Accept/Decline webhook to GHL and discovered the actual payload fields
+## 2026-09-23 — BD has two Lead Submitted form templates (both now wired)
+BD profiles use TWO different form templates for lead submissions:
+- `bootstrap_get_match` — original template (built-in webhook existed)
+- `copy_of_bootstrap_get_match` — v2 template (NO webhook until today)
+
+Some profiles load both forms; which one fires depends on which contact button the
+patient clicks. Test leads from ZZTEST were firing the v2 form, which had no webhook.
+
+**Fix:** Created custom webhook in BD Developer Hub for `copy_of_bootstrap_get_match`
+pointing to the same B2C workflow URL. Both forms now trigger the Lead Reminder Sequence.
+
+**Coverage note:** This wasn't just a test issue — any real doctor profile using the v2
+template was also missing webhooks. Now fixed.
+
+## 2026-09-22 — INCIDENT: Synthetic payload broke production workflow
+A real lead (#9601, patient inquiry to Dr. Steven MacDonald) triggered the Lead Reminder
+Sequence while it was mapped to synthetic field names (`doctor_email`, `plan_id`) instead
+of BD's real field names. Create/Update Contact failed silently — no contact created,
+workflow enrolled a phantom. Workflow paused (Draft) pending fix.
+
+**Root cause:** We posted synthetic curl payloads to the production webhook URL to prime
+GHL's field mapper. BD's real payload uses different field names.
+
+**Rule (permanent):** NEVER post synthetic payloads to production webhook URLs. All trigger
+mappings must come from captured real events via the ZZTEST doctor.
+
+## 2026-09-22 — BD Lead Submitted payload: real field names (CORRECTS Sep 20 entry)
+Captured real BD webhook via ZZTEST. Actual field names:
+- **Doctor fields:** `member_email`, `member_first_name`, `member_last_name`, `member_phone_number`
+- **Patient fields:** `lead_name`, `lead_email`, `lead_phone`, `lead_message`, `lead_location`
+- **System fields:** `lead_id`, `lead_match_id`, `formname` (= `bootstrap_get_match`)
+
+**CRITICAL:** `plan_id` / tier is **NOT** in the payload. Cannot branch on tier from webhook
+data alone. Must use pre-applied contact tag (`tier-annual`) synced from BD member exports.
+
+The Sep 20 entry below was based on synthetic curl and is **WRONG** — do not use those field names.
+
+## 2026-09-22 — BD support ticket: request plan_id in Lead Submitted payload
+Filed request with BD to add `plan_id` or membership tier field to the Lead Submitted
+webhook payload. Would eliminate need for pre-tagged contacts and manual tier sync.
+
+## ~~2026-09-20 — BD Lead Accept/Decline payload schema confirmed~~ SUPERSEDED
+~~Wired the Lead Accept/Decline webhook to GHL and discovered the actual payload fields
 via inbound webhook custom values: Lead Id, Doctor Id, Doctor Email, Doctor First Name,
-Action, Action Timestamp, Plan Id. Key findings:
-- **Plan Id is included** — means tier branching (Annual/Unverified vs Level 2+) is
-  buildable directly in the reminder workflow without a separate lookup.
-- **Lead Id is included** — enables per-lead opportunity records per Workflow 8.
-- **Action field** — exact values TBD; need to test with real decline to confirm whether
-  BD sends "accept"/"decline", "Accepted"/"Declined", or something else. Current branch
-  uses `contains` to handle either case.
+Action, Action Timestamp, Plan Id.~~
+
+**THIS ENTRY WAS WRONG** — based on synthetic curl payload, not real BD data. See Sep 22
+correction above. Lead Accept/Decline real schema still TBD (need to capture real decline).
 
 ## 2026-09-20 — Contacts are doctors, Opportunities are leads
 GHL data model decision: doctor records are Contacts (one per doctor, persistent),

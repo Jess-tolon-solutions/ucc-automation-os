@@ -2,7 +2,7 @@
 
 Current state of UCC Automation OS implementation. Updated as work completes.
 
-**Last updated:** Sep 20, 2026 (evening)
+**Last updated:** Sep 23, 2026
 
 ---
 
@@ -58,7 +58,8 @@ Current state of UCC Automation OS implementation. Updated as work completes.
 
 - [x] Rebuilt in correct B2C account (Directory copy deleted)
 - [x] Inbound webhook trigger for Lead Submitted
-- [x] Branch on `plan_id` (Level 2+ vs Annual/Unverified)
+- [x] Field mappings corrected to real BD names (`member_email`, `member_first_name`)
+- [x] Branch on `tier-annual` tag (replaces plan_id — not in payload)
 - [x] For Annual/Unverified: reminder sequence
   - [x] Tag contact `pending-lead`
   - [x] Wait 24hr → send reminder 1
@@ -66,6 +67,9 @@ Current state of UCC Automation OS implementation. Updated as work completes.
   - [x] Wait 24hr → send expiration notice (72hr total)
 - [x] Email templates created from drafted copy
 - [x] SMS templates created from drafted copy
+- [x] 150 Annual/Unverified members bulk-tagged with `tier-annual` via API
+- [x] **FIXED:** BD v2 form template (`copy_of_bootstrap_get_match`) now wired to same webhook
+- [x] Workflow tested end-to-end: lead → tier check passes → `pending-lead` tag added
 - [ ] Add opportunity creation (Patient Leads pipeline, lead_id in name)
 
 **Workflow 2 — Lead Accept Decline Handler:** DRAFT in B2C (Upper Cervical Care)
