@@ -2,6 +2,36 @@
 
 Dated record of non-obvious choices. Newest first.
 
+## 2026-09-23/24 — BD allows ONE custom webhook per form; fan-out via GHL relay
+BD limits one custom webhook per form. Both live lead form slots (`bootstrap_get_match`
+and `copy_of_bootstrap_get_match`) are already used by the Lead Reminder Sequence feed.
+
+**Solution:** All fan-out happens GHL-side via workflow Custom Webhook actions, not by
+adding more BD webhooks. The "form copy trick" doesn't help — a new form copy is
+selectable in the dropdown but never receives live submissions.
+
+**Architecture:**
+- Lead Reminder Sequence receives BD webhook → relays JSON to Patient Expiration Watch
+- Lead Accept Decline Handler receives BD webhook → relays to Patient Watch Stop
+- GHL Custom Webhook is a premium action with per-execution microcharge
+
+## 2026-09-23/24 — "Remove From Workflow" only acts on enrolled contact
+GHL's "Remove From Workflow" action only affects the CURRENTLY ENROLLED contact in
+that workflow execution. It cannot reach across to remove a different contact.
+
+**Implication:** Cross-contact stops (doctor event must stop patient enrollment) require
+a webhook relay into a workflow that enrolls the other party. The Patient Watch Stop
+workflow exists specifically to receive the relay and act on the patient contact.
+
+## 2026-09-23/24 — Synthetic payload rule tightened
+Rule reaffirmed: no synthetic payloads to production webhook URLs.
+
+**Tightened:** NEVER use a spoofed `BD-Software` user-agent in synthetic payloads.
+
+**Exception:** Replaying a relay body we authored ourselves (exact keys only) to satisfy
+GHL's sample-capture requirement is acceptable — these are our own field names, not
+pretending to be BD.
+
 ## 2026-09-23 — BD has two Lead Submitted form templates (both now wired)
 BD profiles use TWO different form templates for lead submissions:
 - `bootstrap_get_match` — original template (built-in webhook existed)
