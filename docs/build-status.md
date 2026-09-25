@@ -2,7 +2,7 @@
 
 Current state of UCC Automation OS implementation. Updated as work completes.
 
-**Last updated:** Sep 24, 2026
+**Last updated:** Sep 25, 2026
 
 ---
 
@@ -14,6 +14,8 @@ Current state of UCC Automation OS implementation. Updated as work completes.
 | D2C Reminders (Workflow 2–3) | **LIVE** | Lead Reminder Sequence + Accept/Decline Handler tested |
 | Patient Expiration Watch | **LIVE** | 72hr patient notice via relay from Lead Reminder Sequence |
 | Patient Watch Stop | **DRAFT** | Shell built, field name fix needed |
+| tier-annual Tag Coverage | **COMPLETE** | 705 members audited, 555 gaps fixed, 0 failures |
+| BD Sign Up Auto-Tagger | **PRIORITY** | Closes standing leak for new Plan 3/31 signups |
 | ZIP Fallback Cascade (Workflow 4) | NOT STARTED | Blocked by Maximum Matches decision |
 | Dashboard (Workflow 8–9) | PARTIAL | Patient Leads pipeline + Opportunity tracking live |
 
@@ -126,21 +128,47 @@ GHL-side via Custom Webhook actions.
 
 ---
 
-## Tomorrow (Sep 25, 2026)
+## Completed Today (Sep 25, 2026)
 
-1. **Fix Patient Watch Stop relay:**
+### tier-annual Tag Coverage Audit — COMPLETE
+
+Audited GHL coverage for Plan 3 (Unverified Doctor) and Plan 31 (Level 1 Annual) members.
+
+**Findings:**
+- Plan 3: 150 members | Plan 31: 562 members | Overlap: 7 | Unique: 705
+- Already tagged: 150 | Untagged: 70 | Missing from GHL: 485
+
+**Remediation:**
+- ✅ 485 contacts created with `tier-annual` tag
+- ✅ 70 contacts updated with `tier-annual` tag
+- ✅ 0 failures
+- ✅ Full {3, 31} population now tagged
+
+**Standing leak:** New signups after Sept 25 get NO tag until auto-tagger is built.
+
+---
+
+## Next Up
+
+1. **BD Sign Up Auto-Tagger (PRIORITY):**
+   - Wire BD "Sign Up" webhook to new GHL workflow
+   - Branch on `plan_id` ∈ {3, 31}
+   - Add `tier-annual` tag on match
+   - Closes the standing leak
+
+2. **Fix Patient Watch Stop relay:**
    - Update Lead Accept Decline Handler relay body
    - `lead_id` → `{{inboundWebhookRequest.lead.lead_id}}`
    - `lead_email` → `{{inboundWebhookRequest.lead.lead_email}}`
 
-2. **Complete Patient Watch Stop workflow:**
+3. **Complete Patient Watch Stop workflow:**
    - Add remaining steps
    - Test end-to-end
    - Publish
 
-3. **Add Opportunity stage update** to Patient Expiration Watch (Expired - No Response)
+4. **Add Opportunity stage update** to Patient Expiration Watch (Expired - No Response)
 
-4. **ZIP Fallback Cascade** — discuss with Billy
+5. **ZIP Fallback Cascade** — discuss with Billy
 
 ---
 

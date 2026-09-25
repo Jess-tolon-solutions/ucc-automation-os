@@ -36,8 +36,11 @@ Full spec: `docs/workflow-specification.md` (Workflows 1–9). Read it before de
 - BD's native lead engine WORKS: capture, tier routing (custom Lead Action ID 3
   "Paid Membership Leads - FLOW Automatically"), radius matching, and notifications all fire.
   Do not rebuild these. Our scope is the management layer around them.
-- Plan IDs — Level 2+ (full access): 2, 18, 19, 23, 26, 27, 29, 33. Annual/Unverified
-  ($50 flow): 3, 31.
+- Plan IDs — Level 2+ (full access): 2, 18, 19, 23, 26, 27, 29, 33.
+- Plan IDs — $50 accept/decline flow: **Plan 3 (Unverified Doctor)** and **Plan 31 (Level 1 Annual)**.
+- GHL tag `tier-annual` covers BOTH plan 3 and plan 31 — the tag name is historical, do not rename.
+- **STANDING LEAK:** New plan 3/31 signups after Sept 25, 2026 get NO tag until the BD Sign Up
+  webhook auto-tagger is built. That workflow is priority this week — see decision log.
 - BD lead settings: Maximum Matches = 5 (conflicts with spec's one-doctor cascade —
   open question for Billy, see decision log).
 - BD admin bug: Edit pages for Lead Actions 404 on Build 4.0. Ticket filed with BD support.
@@ -74,7 +77,7 @@ Full spec: `docs/workflow-specification.md` (Workflows 1–9). Read it before de
 - Proprietary campaign methodology stays in the separate `profile-drive-os` repo — never here.
   This repo transfers to UCC.
 
-## Current build status (Sep 20, 2026)
+## Current build status (Sep 25, 2026)
 
 See `docs/build-status.md` for full detail.
 
@@ -86,15 +89,18 @@ See `docs/build-status.md` for full detail.
 - [x] BD event discovery: Lead Submitted, Lead Accept/Decline, One-Time Purchase all
       available as real-time webhooks (smart-list webhooks are batch-only — dead end)
 - [x] D2C reminder copy drafted (24hr, 48hr, 72hr expiration)
+- [x] Lead Reminder Sequence LIVE (both BD form templates wired)
+- [x] Lead Accept Decline Handler LIVE (stops reminders on doctor response)
+- [x] Patient Expiration Watch LIVE (72hr patient notification via relay)
+- [x] tier-annual tag coverage audit: 705 members audited, 555 gaps fixed, 0 failures
 
 **In progress:**
-- [ ] D2C reminders: Repoint BD Lead Submitted webhook to B2C account → build GHL
-      reminder workflow with Lead Accept as stop condition — BUILDING NOW
+- [ ] BD Sign Up Auto-Tagger — closes standing leak for new Plan 3/31 signups (PRIORITY)
+- [ ] Patient Watch Stop — shell built, relay field names need fix
 - [ ] All system copy sent for Billy approval
 
 **Not started:**
 - [ ] jordan template fix
-- [ ] Expiration handling + patient loop
 - [ ] ZIP fallback cascade (Workflow 4) — BLOCKED on Maximum Matches decision
 - [ ] Tracking view / exception queue (Workflow 8–9)
 - [ ] Handover docs + ownership transfer

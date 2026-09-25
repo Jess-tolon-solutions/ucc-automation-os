@@ -2,6 +2,39 @@
 
 Dated record of non-obvious choices. Newest first.
 
+## 2026-09-25 — tier-annual tag coverage audit: Sept 22 covered Annual only; 555 of 564 Unverified members uncovered
+
+**Background:** The D2C reminder workflow branches on the `tier-annual` tag to identify
+Plan 3 (Unverified Doctor) and Plan 31 (Level 1 Annual) members. The Sept 22 bulk-tag
+operation was scoped incorrectly — it covered only Plan 31 (Level 1 Annual), leaving
+Plan 3 (Unverified Doctor) almost entirely untagged.
+
+**Audit findings:**
+- Plan 3 (Unverified Doctor): 150 members in BD export
+- Plan 31 (Level 1 Annual): 562 members in BD export
+- Overlap (7 emails in both): net 705 unique members
+- Already tagged in GHL: 150 contacts
+- Gap: 555 members missing `tier-annual` tag
+
+**Remediation completed (Sept 25):**
+- 485 contacts created (new to GHL) with `tier-annual` tag
+- 70 contacts updated (existed but untagged) with `tier-annual` tag
+- 0 failures
+- All 705 Plan 3 + Plan 31 members now covered
+
+**Standing leak identified:** This was a one-time backfill. New Plan 3/31 signups
+after Sept 25 will NOT receive the tag automatically until the BD Sign Up webhook
+auto-tagger workflow is built. That workflow is now priority — see proposal below.
+
+**Proposed fix (BD Sign Up Auto-Tagger):**
+1. BD fires "Sign Up" webhook on new member registration
+2. GHL workflow receives payload containing `plan_id`
+3. If `plan_id` ∈ {3, 31}: Create/Update Contact, add `tier-annual` tag
+4. Publish and monitor
+
+Until that workflow is live, any new Plan 3/31 signups will silently skip the
+reminder cadence.
+
 ## 2026-09-23/24 — BD allows ONE custom webhook per form; fan-out via GHL relay
 BD limits one custom webhook per form. Both live lead form slots (`bootstrap_get_match`
 and `copy_of_bootstrap_get_match`) are already used by the Lead Reminder Sequence feed.
