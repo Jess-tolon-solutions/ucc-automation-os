@@ -59,8 +59,10 @@ Notifies patient after 72hr if doctor doesn't respond.
 
 - [x] Inbound webhook trigger (fed by GHL relay, NOT BD)
 - [x] Create/Update Contact (patient: `lead_name`, `lead_email`, `lead_phone`)
+- [ ] **ADD:** Send Email (patient confirmation — "within 48 hours") ← INSERT HERE
 - [x] Add Tag `patient-inquiry`
 - [x] Create Opportunity (pipeline "Patient Leads", stage "Awaiting Response")
+- [ ] **FIX:** Opportunity Name → `{{lead_name}} → {{member_email}}` (shows doctor on board)
 - [x] Opportunity custom fields: `lead_id`, `patient_email`, `patient_phone`, `patient_location`, `doctor_email`
 - [x] Wait 72 hours
 - [x] If/Else: pipeline stage = "Awaiting Response"
@@ -69,18 +71,42 @@ Notifies patient after 72hr if doctor doesn't respond.
 - [x] Update Opportunity stage → "Expired - No Response"
 - [ ] Publish (after Patient Watch Stop)
 
-### Patient Watch Stop — PUBLISHING TODAY (first)
+**Copy:** `copy/patient-confirmation-instant.md`
+
+### Patient Watch Stop — FIX NEEDED + PUBLISH
 Stops Patient Expiration Watch when doctor accepts/declines.
+
+**TEST RESULT (Sept 25, 8:22pm):**
+- Patient removed from Patient Expiration Watch: ✓ CONFIRMED
+- Opportunity stage update: ✗ FAILED ("Internal Action Error - Please use Opportunity trigger/find opportunity action")
+
+**FIX:** Add "Opportunity Lookup" action BEFORE the If/Else condition (see `ghl/workflow-fixes-sept25.md`)
 
 - [x] Inbound webhook trigger ("Accept / Decline Relay")
 - [x] Trigger sample captured (from Lead Accept Decline Handler relay)
 - [x] Create/Update Contact by `lead_email` (patient)
 - [x] Remove From Workflow → Patient Expiration Watch
+- [ ] **ADD:** Opportunity Lookup (Pipeline: Patient Leads, Contact: enrolled) ← FIX
 - [x] If/Else on `lead_action` (LITERAL values: "accept" / "decline", not merge tags)
 - [x] Accept branch: Update Opportunity stage → "Accepted"
 - [x] Decline branch: Update Opportunity stage → "Declined"
 - [x] None branch: END
+- [ ] Re-test after fix
 - [ ] Publish (first, before Expiration Watch)
+
+### Sign Up Auto-Tagger — BUILD
+Automatically tags new Plan 3/31 signups with `tier-annual`. Closes standing leak.
+
+- [ ] Create workflow: Inbound Webhook trigger (BD Sign Up)
+- [ ] Create/Update Contact (email, first_name, last_name)
+- [ ] If/Else: plan_id Is "3" OR Is "31"
+- [ ] YES branch: Add Tag `tier-annual`
+- [ ] Wire BD "Sign Up" webhook to workflow URL
+- [ ] Test with real signup
+- [ ] Publish
+
+**BD webhook event:** "Sign Up" (or "New Member Registration" / "Member Created")
+**Spec:** `ghl/bd-signup-auto-tagger.md`
 
 ---
 
@@ -107,6 +133,7 @@ Routes doctor inquiries to pipelines + Slack.
 | Lead Submitted (`bootstrap_get_match`) | Lead Reminder Sequence | Live |
 | Lead Submitted v2 (`copy_of_bootstrap_get_match`) | Lead Reminder Sequence | Live |
 | Lead Accept / Decline | Lead Accept Decline Handler | Live |
+| Sign Up | Sign Up Auto-Tagger | **TO BUILD** — closes tag leak |
 
 **Key constraint:** BD allows ONE custom webhook per form. All fan-out happens
 GHL-side via Custom Webhook actions.

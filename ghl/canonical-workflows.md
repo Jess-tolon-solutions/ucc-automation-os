@@ -123,12 +123,17 @@ Never use synthetic/guessed field names.
    - First Name ← `{{lead_name}}`
    - Phone ← `{{lead_phone}}`
 
-2. **Add Tag:** `patient-inquiry`
+2. **Send Email** (patient confirmation — immediate)
+   - Subject: Your inquiry has been received
+   - Body: "Thank you for reaching out... You should hear back within 48 hours."
+   - Copy: `copy/patient-confirmation-instant.md`
 
-3. **Create Opportunity**
+3. **Add Tag:** `patient-inquiry`
+
+4. **Create Opportunity**
    - Pipeline: Patient Leads
    - Stage: Awaiting Response
-   - Opportunity Name: `Lead {{lead_id}} - {{lead_name}}`
+   - Opportunity Name: `{{lead_name}} → {{member_email}}`
    - Custom Fields (Lead Automation folder):
      - `lead_id` ← `{{lead_id}}`
      - `patient_email` ← `{{lead_email}}`
@@ -136,22 +141,22 @@ Never use synthetic/guessed field names.
      - `patient_location` ← `{{lead_location}}`
      - `doctor_email` ← `{{member_email}}`
 
-4. **Wait:** 72 hours
+5. **Wait:** 72 hours
 
-5. **If/Else: Check Opportunity stage**
+6. **If/Else: Check Opportunity stage**
    - Condition: Pipeline stage is "Awaiting Response"
-   - YES → continue to step 6
+   - YES → continue to step 7
    - NO (already Accepted/Declined) → **END**
 
-6. **Send Patient Expiration Email**
+7. **Send Patient Expiration Email**
    - Copy: `copy/patient-expiration-72hr.md` (Find a Doctor variant)
    - Billy-approved
 
-7. **Add Tag:** `patient-expired-notified`
+8. **Add Tag:** `patient-expired-notified`
 
-8. **Update Opportunity Stage** → "Expired - No Response"
+9. **Update Opportunity Stage** → "Expired - No Response"
 
-9. **END**
+10. **END**
 
 ---
 
@@ -170,7 +175,12 @@ Never use synthetic/guessed field names.
 
 2. **Remove From Workflow** → target: Patient Expiration Watch
 
-3. **If/Else on lead_action:**
+3. **Opportunity Lookup** (REQUIRED for Update Opportunity to work)
+   - Pipeline: Patient Leads
+   - Lookup by: Contact (enrolled contact)
+   - Loads the opportunity created by Patient Expiration Watch into context
+
+4. **If/Else on lead_action:**
 
    **Branch A: Accept**
    - Condition: `{{lead_action}}` is `accept` (LITERAL typed value, not merge tag)
@@ -273,8 +283,10 @@ into a workflow that enrolls the other party.
 ### Patient Expiration Watch
 - [x] Trigger is Inbound Webhook (GHL relay, NOT BD)
 - [x] Create/Update Contact creates patient record
+- [ ] Send Email: patient confirmation ("within 48 hours") — TO ADD
 - [x] Add Tag `patient-inquiry`
 - [x] Create Opportunity in Patient Leads pipeline
+- [ ] Opportunity Name: `{{lead_name}} → {{member_email}}` — TO FIX
 - [x] Wait 72 hours
 - [x] If/Else checks Opportunity stage = "Awaiting Response"
 - [x] Send patient expiration email (Find a Doctor variant)
@@ -285,6 +297,7 @@ into a workflow that enrolls the other party.
 - [x] Trigger is Inbound Webhook (GHL relay, NOT BD)
 - [x] Create/Update Contact by `lead_email` (patient)
 - [x] Remove From Workflow targets "Patient Expiration Watch"
+- [ ] Opportunity Lookup (Pipeline: Patient Leads, Contact: enrolled) — TO ADD (fixes "Internal Action Error")
 - [x] If/Else branches on `lead_action` (LITERAL values, not merge tags)
 - [x] Accept branch: Update Opportunity → "Accepted"
 - [x] Decline branch: Update Opportunity → "Declined"

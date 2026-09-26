@@ -2,6 +2,50 @@
 
 Dated record of non-obvious choices. Newest first.
 
+## 2026-09-25 — End-to-end decline test: patient stop confirmed, Opp update failed
+
+**Test:** Sept 25, 8:22pm — real decline via Patient Watch Stop relay
+
+**Results:**
+- Patient removed from Patient Expiration Watch: ✓ CONFIRMED
+- Opportunity stage update to "Declined": ✗ FAILED
+
+**Error:** "Internal Action Error - Please use Opportunity trigger/find opportunity action to get the opportunity"
+
+**Root cause:** Workflow triggered by inbound webhook has contact context only. The
+"Update Opportunity" action requires an opportunity to be loaded into context first.
+
+**Fix:** Add "Opportunity Lookup" action in main line BEFORE the If/Else condition.
+Lookup by Pipeline: Patient Leads, Contact: enrolled contact. This loads the opp
+created by Patient Expiration Watch into context so Update Opportunity can act on it.
+
+**GHL action naming:**
+- "Opportunity Lookup" — finds existing opp by pipeline + contact (USE THIS)
+- "Update Opportunity" — updates an opp already in context
+- "Create Opportunity" — creates new opp (not what we need)
+
+## 2026-09-25 — Sign Up Auto-Tagger workflow designed (closes standing leak)
+
+New workflow to automatically tag Plan 3/31 signups with `tier-annual`:
+1. BD fires "Sign Up" webhook on new member registration
+2. GHL workflow: Inbound Webhook → Create/Update Contact → If plan_id ∈ {3, 31} → Add Tag tier-annual
+
+**BD webhook event:** "Sign Up" (or "New Member Registration" / "Member Created")
+**Field to branch on:** `plan_id` or `subscription_id` — verify from real payload
+
+This closes the leak where new Annual/Unverified signups never get tagged and fall
+out of the reminder sequence.
+
+## 2026-09-25 — Patient confirmation email: send immediately on Patient Watch enrollment
+
+Added instant patient confirmation as first action in Patient Expiration Watch
+(after Create/Update Contact, before Add Tag).
+
+**Copy:** "Your inquiry has been received... You should hear back within 48 hours."
+**File:** `copy/patient-confirmation-instant.md`
+
+Patient must never see membership level or the $50 fee (per spec Workflow 3, line 83).
+
 ## 2026-09-25 — Lead Accept/Decline payload is NESTED (verified via real decline)
 
 Captured real decline event (lead 9630). Accept/Decline payload uses nested objects,
