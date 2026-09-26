@@ -11,27 +11,30 @@ Current state of UCC Automation OS implementation. Updated as work completes.
 | Lane | Status | Notes |
 |------|--------|-------|
 | B2B (Workflows 5–6) | **LIVE** | BD webhook → GHL Directory → pipelines + Slack + contacts |
-| D2C Reminders (Workflow 2–3) | **LIVE** | Lead Reminder Sequence + Accept/Decline Handler tested |
-| Patient Expiration Watch | **LIVE** | 72hr patient notice via relay from Lead Reminder Sequence |
-| Patient Watch Stop | **DRAFT** | Shell built, field name fix needed |
+| D2C Reminders (Workflow 2–3) | **LIVE** | Lead Reminder Sequence (w/ VM drop) + Accept/Decline Handler |
+| Patient Expiration Watch | **PUBLISHING** | 72hr patient notice, Opp stage update included |
+| Patient Watch Stop | **PUBLISHING** | Relay field names FIXED, publishing today (Stop first) |
 | tier-annual Tag Coverage | **COMPLETE** | 705 members audited, 555 gaps fixed, 0 failures |
-| BD Sign Up Auto-Tagger | **PRIORITY** | Closes standing leak for new Plan 3/31 signups |
-| ZIP Fallback Cascade (Workflow 4) | NOT STARTED | Blocked by Maximum Matches decision |
-| Dashboard (Workflow 8–9) | PARTIAL | Patient Leads pipeline + Opportunity tracking live |
+| BD Sign Up Auto-Tagger | **NEXT** | Closes standing leak for new Plan 3/31 signups |
+| ZIP Fallback Cascade (Workflow 4) | PHASE 2 | Blocked by Maximum Matches decision |
+| Dashboard (Workflow 8–9) | PARTIAL | Patient Leads pipeline (3 real opps in Awaiting Response) |
 
 ---
 
 ## B2C Account Workflows (Upper Cervical Care)
 
-### Lead Reminder Sequence — LIVE
+### Lead Reminder Sequence — LIVE (705-doctor audience)
 Doctor reminder workflow for Annual/Unverified tier.
 
 - [x] Inbound webhook trigger (both BD form templates wired)
-- [x] Field mappings: `member_email`, `member_first_name`
+- [x] Field mappings: `member_email`, `member_first_name`, `member_phone_number`
 - [x] Branch on `tier-annual` tag
 - [x] Add `pending-lead` tag
-- [x] **NEW:** Custom Webhook relay to Patient Expiration Watch (premium action)
+- [x] Custom Webhook relay to Patient Expiration Watch (premium action)
 - [x] Wait 24hr → reminder 1 (email + SMS)
+- [x] **NEW:** Voicemail drop (ringless, ~15sec Billy-approved script)
+  - Drops immediately at 24hr mark (no time-window gate in v1)
+  - Premium action + per-drop telephony charge — Billy aware
 - [x] Wait 24hr → reminder 2 (email + SMS)
 - [x] Wait 24hr → expiration notice (email + SMS)
 - [x] Remove `pending-lead` tag, add `lead-expired` tag
@@ -40,17 +43,18 @@ Doctor reminder workflow for Annual/Unverified tier.
 Stops reminders when doctor responds.
 
 - [x] Inbound webhook trigger (BD Lead Accept/Decline event)
-- [x] Field mappings: `user.email`, `user.first_name`, `lead_action`
+- [x] Field mappings: `user.email`, `user.first_name`, `lead_action` (NESTED payload)
 - [x] Create/Update Contact (doctor)
 - [x] Remove From Workflow → Lead Reminder Sequence
 - [x] Remove Tag `pending-lead`
-- [x] **NEW:** Custom Webhook relay to Patient Watch Stop
+- [x] Custom Webhook relay to Patient Watch Stop
+  - **FIXED:** Relay body uses nested paths: `lead.lead_id`, `lead.lead_email`
+  - Verified with live decline (lead 9630) — real values received
 - [x] If/Else on `lead_action`
 - [x] Accept branch: add `lead-accepted` tag
 - [x] Decline branch: add `lead-declined` tag
-- [ ] **TODO:** Fix relay body — `lead_id` and `lead_email` render null (use `lead.lead_id`, `lead.lead_email`)
 
-### Patient Expiration Watch — LIVE
+### Patient Expiration Watch — PUBLISHING TODAY
 Notifies patient after 72hr if doctor doesn't respond.
 
 - [x] Inbound webhook trigger (fed by GHL relay, NOT BD)
@@ -62,18 +66,21 @@ Notifies patient after 72hr if doctor doesn't respond.
 - [x] If/Else: pipeline stage = "Awaiting Response"
 - [x] YES: Send patient expiration email (Find a Doctor variant, Billy-approved)
 - [x] Add Tag `patient-expired-notified`
-- [ ] **TODO:** Update Opportunity stage → "Expired - No Response"
+- [x] Update Opportunity stage → "Expired - No Response"
+- [ ] Publish (after Patient Watch Stop)
 
-### Patient Watch Stop — DRAFT
+### Patient Watch Stop — PUBLISHING TODAY (first)
 Stops Patient Expiration Watch when doctor accepts/declines.
 
 - [x] Inbound webhook trigger ("Accept / Decline Relay")
-- [x] Trigger sample captured
-- [ ] Create/Update Contact by `lead_email`
-- [ ] Remove From Workflow → Patient Expiration Watch
-- [ ] If/Else on `lead_action`
-- [ ] Update Opportunity stage → Accepted/Declined
-- [ ] Publish
+- [x] Trigger sample captured (from Lead Accept Decline Handler relay)
+- [x] Create/Update Contact by `lead_email` (patient)
+- [x] Remove From Workflow → Patient Expiration Watch
+- [x] If/Else on `lead_action` (LITERAL values: "accept" / "decline", not merge tags)
+- [x] Accept branch: Update Opportunity stage → "Accepted"
+- [x] Decline branch: Update Opportunity stage → "Declined"
+- [x] None branch: END
+- [ ] Publish (first, before Expiration Watch)
 
 ---
 
@@ -150,23 +157,21 @@ Audited GHL coverage for Plan 3 (Unverified Doctor) and Plan 31 (Level 1 Annual)
 
 ## Next Up
 
-1. **BD Sign Up Auto-Tagger (PRIORITY):**
+1. **Publish Patient Watch Stop + Patient Expiration Watch** (today)
+   - Publish order: Stop first, then Watch
+   - End-to-end test with real accept/decline
+
+2. **Patient instant-confirmation email:**
+   - First action in Patient Expiration Watch (before 72hr wait)
+   - Pending copy approval
+
+3. **BD Sign Up Auto-Tagger:**
    - Wire BD "Sign Up" webhook to new GHL workflow
    - Branch on `plan_id` ∈ {3, 31}
    - Add `tier-annual` tag on match
-   - Closes the standing leak
+   - Closes standing leak for new signups
 
-2. **Fix Patient Watch Stop relay:**
-   - Update Lead Accept Decline Handler relay body
-   - `lead_id` → `{{inboundWebhookRequest.lead.lead_id}}`
-   - `lead_email` → `{{inboundWebhookRequest.lead.lead_email}}`
-
-3. **Complete Patient Watch Stop workflow:**
-   - Add remaining steps
-   - Test end-to-end
-   - Publish
-
-4. **Add Opportunity stage update** to Patient Expiration Watch (Expired - No Response)
+4. **Log end-to-end test results**
 
 5. **ZIP Fallback Cascade** — discuss with Billy
 
@@ -190,6 +195,9 @@ Audited GHL coverage for Plan 3 (Unverified Doctor) and Plan 31 (Level 1 Annual)
 
 1. **Maximum Matches = 5 vs exclusive cascade** — BD allows up to 5 doctors to match
    the same lead. Spec assumes one-doctor sequential cascade. Which model?
+
+2. **info@uppercervicalcare.com monitoring** — Voicemail script references this address.
+   Who monitors it? Reply-to on reminder emails should point at a monitored address.
 
 ---
 

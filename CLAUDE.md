@@ -81,26 +81,30 @@ Full spec: `docs/workflow-specification.md` (Workflows 1–9). Read it before de
 
 See `docs/build-status.md` for full detail.
 
-**Completed:**
-- [x] Audit complete; deposit received; $3k build, $1.5k/$1.5k terms
-- [x] Slack #b2b-inquiries channel created
-- [x] B2B routing LIVE: BD "Contact Us Form Submitted" webhook → GHL Directory workflow
-      → pipelines (B2B Member Support, Prospective Doctors) + Slack post
-- [x] BD event discovery: Lead Submitted, Lead Accept/Decline, One-Time Purchase all
-      available as real-time webhooks (smart-list webhooks are batch-only — dead end)
-- [x] D2C reminder copy drafted (24hr, 48hr, 72hr expiration)
-- [x] Lead Reminder Sequence LIVE (both BD form templates wired)
-- [x] Lead Accept Decline Handler LIVE (stops reminders on doctor response)
-- [x] Patient Expiration Watch LIVE (72hr patient notification via relay)
-- [x] tier-annual tag coverage audit: 705 members audited, 555 gaps fixed, 0 failures
+**LIVE:**
+- [x] B2B routing: BD Contact Us webhook → GHL Directory → pipelines + Slack
+- [x] Lead Reminder Sequence (705-doctor audience, both BD form templates, VM drop included)
+- [x] Lead Accept Decline Handler (with working Patient Watch Stop relay — nested paths fixed)
+- [x] Patient Leads pipeline (3 real opportunities in Awaiting Response as of today)
+- [x] tier-annual tag coverage: 705 members audited, 555 gaps fixed, 0 failures
 
-**In progress:**
-- [ ] BD Sign Up Auto-Tagger — closes standing leak for new Plan 3/31 signups (PRIORITY)
-- [ ] Patient Watch Stop — shell built, relay field names need fix
-- [ ] All system copy sent for Billy approval
+**PUBLISHING TODAY:**
+- [ ] Patient Watch Stop (relay → Remove From Workflow → Update Opp stage)
+- [ ] Patient Expiration Watch (72hr wait → patient notification → Opp "Expired - No Response")
+- Publish order: Stop first, then Watch
 
-**Not started:**
-- [ ] jordan template fix
-- [ ] ZIP fallback cascade (Workflow 4) — BLOCKED on Maximum Matches decision
-- [ ] Tracking view / exception queue (Workflow 8–9)
+**NEXT:**
+- [ ] Patient instant-confirmation email (first action in Patient Watch — pending copy)
+- [ ] BD Sign Up Auto-Tagger (closes standing leak for new Plan 3/31 signups — promoted from phase 2)
+- [ ] End-to-end test results to be logged
+
+**PHASE 2 (unchanged):**
+- [ ] ZIP fallback cascade (Find-a-Doctor expiration email ships as v1 patient path) — BLOCKED on Maximum Matches
+- [ ] Nurture sequences
+- [ ] Escalation queue
+- [ ] Dashboard / tracking view
+
+**OPEN:**
+- [ ] jordan template fix in BD
+- [ ] info@uppercervicalcare.com — Billy to confirm who monitors; reply-to for reminder emails
 - [ ] Handover docs + ownership transfer

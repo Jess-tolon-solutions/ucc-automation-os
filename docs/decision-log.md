@@ -2,6 +2,57 @@
 
 Dated record of non-obvious choices. Newest first.
 
+## 2026-09-25 — Lead Accept/Decline payload is NESTED (verified via real decline)
+
+Captured real decline event (lead 9630). Accept/Decline payload uses nested objects,
+unlike the flat Lead Submitted payload.
+
+**Structure:**
+- Top level: `lead_action`, `is_webhook_post`, `lead_stringify`, `user_stringify`
+- `lead{}`: `lead_id`, `lead_email`, `lead_phone_copy` (note: NOT `lead_phone`), etc.
+- `user{}`: `user_id`, `email`, `first_name`, `subscription_id`, `member_login_link` (SENSITIVE)
+
+**GHL merge tags must use nested paths:**
+- `{{inboundWebhookRequest.lead.lead_id}}` — NOT `{{lead_id}}`
+- `{{inboundWebhookRequest.lead.lead_email}}` — NOT `{{lead_email}}`
+
+**Previous bug:** Relay body used flat paths → rendered null. Fixed.
+
+## 2026-09-25 — Accept/Decline fires for ALL tiers (including Level 2+)
+
+Observed Accept/Decline event for subscription_id 26 (Level 2+) with lead_price 0.00.
+The workflow receives events for all tiers, not just Annual/Unverified.
+
+**Implication:** Stop relay firing for Level 2+ is a harmless no-op — those patients
+were never enrolled in Patient Expiration Watch (enrollment only happens for tier-annual
+doctors in Lead Reminder Sequence).
+
+## 2026-09-25 — Relay placement rule: relay lives where the trigger signal originates
+
+Removed a misplaced relay from Lead Reminder Sequence (Patient Watch Stop relay was
+firing at submission time for all tiers). The relay belongs in Lead Accept Decline
+Handler — that's the workflow whose trigger carries the accept/decline signal.
+
+**Rule:** A relay lives in the workflow whose TRIGGER carries the signal it forwards.
+
+## 2026-09-25 — Voicemail drop added to reminder cadence
+
+Added ringless voicemail drop directly after 24hr reminder email (tier-annual branch only).
+Billy-approved ~15sec script, references the email, mentions info@uppercervicalcare.com.
+
+**Delivery model:** Option B — drops immediately at 24hr mark, whatever hour. No
+time-window gate in v1. If night drops cause complaints, retrofit 8am recurring-window gate.
+
+**Cost implications:**
+- Premium action + per-drop telephony charge (flagged to Billy)
+- Ringless delivery is carrier-dependent; office VoIP/auto-attendants may reject drops
+- Email remains the guaranteed channel; VM is best-effort second channel
+
+## 2026-09-25 — OPEN: info@uppercervicalcare.com monitoring
+
+Voicemail script references info@uppercervicalcare.com. Billy to confirm who monitors
+that mailbox. Reply-to on reminder emails should point at a monitored address.
+
 ## 2026-09-25 — tier-annual tag coverage audit: Sept 22 covered Annual only; 555 of 564 Unverified members uncovered
 
 **Background:** The D2C reminder workflow branches on the `tier-annual` tag to identify
