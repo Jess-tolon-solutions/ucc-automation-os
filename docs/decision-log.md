@@ -2,6 +2,20 @@
 
 Dated record of non-obvious choices. Newest first.
 
+## 2026-09-25 — General Contact Form patient confirmation: direct to Find a Doctor
+
+Patients who submit the general contact form (classified as "patient looking for a doctor")
+need a confirmation email directing them to the directory.
+
+**Technical finding:** BD's `/locations` search is client-side JavaScript. No URL parameter
+pre-fills ZIP results. Cannot deep-link to `?zip={{lead_location}}`.
+
+**Solution:** Email mentions their ZIP for context but links to the main directory page
+where they can search manually.
+
+**Copy:** `copy/patient-general-form-confirmation.md`
+**Configuration:** BD Admin → Forms → [General Contact Form] → Autoresponder
+
 ## 2026-09-25 — End-to-end decline test: patient stop confirmed, Opp update failed
 
 **Test:** Sept 25, 8:22pm — real decline via Patient Watch Stop relay
@@ -275,10 +289,22 @@ B2B routing, tracking. The 404 on Lead Action edit pages is a BD admin-UI bug
 Tracking view built on GHL pipelines + a lightweight standalone view with a clean data
 contract, so it works day one and can plug into Nick's platform later if that survives.
 
-## OPEN — Maximum Matches = 5 vs one-doctor cascade
-BD currently allows up to 5 doctors to match/buy the same lead. Spec assumes exclusive
-sequential cascade. Billy decision needed: exclusive leads (spec) or shared (current).
-Shapes the Workflow 4 build.
+## RESOLVED 2026-09-25 — Maximum Matches = 5, first to accept wins
+
+**Billy's decision:** All 5 matched doctors receive the lead notification simultaneously.
+First doctor to accept wins — the others lose access.
+
+**Implication for Workflow 4 (ZIP Fallback Cascade):**
+- On 72hr expiration (no response from any of the 5), patient gets "Find a Doctor" email
+- No sequential cascade needed — BD's native matching already fans out to 5 doctors
+- The cascade is parallel, not serial
+
+**Implication for Patient Expiration Watch:**
+- 72hr expiration notice remains the same
+- Patient is directed to self-service via directory (Find a Doctor link)
+- Manual exception queue if patient replies to expiration email needing help
+
+This unblocks the Workflow 4 design — it's simpler than the spec's sequential model.
 
 ## RESOLVED 2026-09-20 — Reminder stop condition on doctor accept
 ~~GHL can't natively see a BD accept event.~~ BD fires a native Lead Accept webhook.

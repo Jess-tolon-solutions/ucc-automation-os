@@ -16,7 +16,7 @@ Current state of UCC Automation OS implementation. Updated as work completes.
 | Patient Watch Stop | **PUBLISHING** | Relay field names FIXED, publishing today (Stop first) |
 | tier-annual Tag Coverage | **COMPLETE** | 705 members audited, 555 gaps fixed, 0 failures |
 | BD Sign Up Auto-Tagger | **NEXT** | Closes standing leak for new Plan 3/31 signups |
-| ZIP Fallback Cascade (Workflow 4) | PHASE 2 | Blocked by Maximum Matches decision |
+| ZIP Fallback Cascade (Workflow 4) | UNBLOCKED | Billy: all 5 doctors, first to accept wins |
 | Dashboard (Workflow 8–9) | PARTIAL | Patient Leads pipeline (3 real opps in Awaiting Response) |
 
 ---
@@ -220,8 +220,8 @@ Audited GHL coverage for Plan 3 (Unverified Doctor) and Plan 31 (Level 1 Annual)
 
 ## Open Questions for Billy
 
-1. **Maximum Matches = 5 vs exclusive cascade** — BD allows up to 5 doctors to match
-   the same lead. Spec assumes one-doctor sequential cascade. Which model?
+1. ~~**Maximum Matches = 5 vs exclusive cascade**~~ — **RESOLVED Sept 25:** All 5 doctors
+   receive lead simultaneously, first to accept wins. No sequential cascade needed.
 
 2. **info@uppercervicalcare.com monitoring** — Voicemail script references this address.
    Who monitors it? Reply-to on reminder emails should point at a monitored address.
