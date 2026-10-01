@@ -2,6 +2,25 @@
 
 Dated record of non-obvious choices. Newest first.
 
+## 2026-09-25 — BD Accept/Decline fires for same lead_id across all rounds
+
+When a cascade doctor (Round 2) accepts, BD fires the same Accept/Decline webhook as Round 1.
+The `lead_id` and `lead.lead_email` are identical regardless of which doctor accepts.
+
+**Implication:** Patient Watch Stop works for both rounds without modification. It matches
+on `lead.lead_email` to find the patient contact and remove them from the workflow.
+
+**Architecture validation:** No separate "cascade accept" handler needed.
+
+## 2026-09-25 — Pipeline stages updated for cascade flow
+
+Renamed and added stages to Patient Leads pipeline:
+- Awaiting Response (initial doctor)
+- Accepted
+- Declined
+- **Rerouted - Round 2** (72hr expired, cascade to 5 ZIP-matched doctors)
+- **Cascade Failed** (cascade 48hr expired, no response from any doctor)
+
 ## 2026-09-25 — General Contact Form patient confirmation: direct to Find a Doctor
 
 Patients who submit the general contact form (classified as "patient looking for a doctor")
