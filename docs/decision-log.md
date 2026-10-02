@@ -2,6 +2,75 @@
 
 Dated record of non-obvious choices. Newest first.
 
+## 2026-10-02 — GHL API token invalid; needs regeneration
+
+The GHL Private Integration token (`pit-d96d2a95-...`) returned 401 Invalid during this
+session when attempting to create custom fields via API.
+
+**Action required:** Regenerate the token in GHL before any future API work.
+**Location:** GHL → Settings → Integrations → Private Integrations
+
+## 2026-10-02 — Contact custom fields for lead data
+
+Three custom fields needed in B2C sub-account (folder: Lead Automation):
+- `lead_id` (text) — BD lead ID
+- `lead_lat` (text) — patient latitude
+- `lead_lng` (text) — patient longitude
+
+These fields store BD lead data on the patient contact so the Patient Chose Reroute
+workflow can pass coordinates to the ZIP Cascade Worker.
+
+**Status:** Pending manual creation in GHL UI (API token invalid).
+
+## 2026-10-02 — ZIP Cascade trigger: patient choice, not automatic 72hr
+
+**Design change:** The cascade does NOT fire automatically at 72hr expiration.
+
+**New flow:**
+1. Patient Expiration Watch sends a choice email at 72hr with two trigger links:
+   - "Connect me with another doctor" → triggers Patient Chose Reroute workflow
+   - "I'll wait" / no action → lead stays in current state
+2. Patient Chose Reroute workflow calls ZIP Cascade Worker
+3. Worker matches to nearby doctors and callbacks to GHL
+
+**Rationale:** Patient agency. Let them decide whether to be rerouted vs wait for
+their chosen doctor. Reduces unwanted contacts to patients who prefer patience.
+
+## 2026-10-02 — ZIP Cascade Worker deployed to Cloudflare
+
+**Worker URL:** `https://zip-cascade.ucc-automation.workers.dev`
+**Cloudflare subdomain:** `ucc-automation.workers.dev`
+**Account:** jessica@uppercervicalcare.com
+
+**Verified working:**
+- POST /api/v2/leads/match works on declined/expired leads (tested lead 9602)
+- BD member records include `lat` and `lon` fields (all 1,048 members have valid coords)
+- Worker correctly selects 1 Level 2+ (nearest) OR up to 5 Annual/Unverified
+
+**Secrets configured:**
+- `BD_API_KEY` — BD API key ("Claude for BD")
+- `GHL_WEBHOOK_URL` — GHL inbound webhook for cascade results
+
+**KV cache:** Pre-populated with 1,048 member records (1hr TTL, slim format ~200KB)
+
+**Selection rule:**
+- Level 2+ in range → match EXACTLY 1 (nearest). Auto-accept means multiple would
+  all contact the same patient.
+- No Level 2+ → match up to 5 Annual/Unverified (nearest first). $50 gate filters
+  to serious interest.
+
+**`has_level2` flag:** When true, GHL must mark opportunity Accepted immediately.
+Level 2+ auto-accept does NOT fire BD's accept webhook, so GHL would never learn
+the patient was connected otherwise.
+
+## 2026-10-01 — BD member coordinate audit: all 1,048 members have valid lat/lon
+
+Audited all BD members via API. Every member has valid coordinates — no 0,0 or
+missing values. The ZIP Cascade Worker can rely on all members being matchable
+by proximity without exclusion logic for bad coordinates.
+
+**Audit file:** `docs/member-coordinate-audit-2026-10-01.md`
+
 ## 2026-09-25 — BD Accept/Decline fires for same lead_id across all rounds
 
 When a cascade doctor (Round 2) accepts, BD fires the same Accept/Decline webhook as Round 1.

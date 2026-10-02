@@ -1,0 +1,25 @@
+# ZIP Cascade Worker - Cloudflare Workers Configuration
+# https://developers.cloudflare.com/workers/wrangler/configuration/
+
+name = "zip-cascade"
+main = "src/index.js"
+compatibility_date = "2024-01-01"
+
+# Secrets (set via `wrangler secret put <NAME>`):
+# - BD_API_KEY: Brilliant Directories API key
+# - GHL_WEBHOOK_URL: GoHighLevel inbound webhook URL
+
+# KV namespace for caching member list
+[[kv_namespaces]]
+binding = "MEMBER_CACHE"
+id = "bf69222a819e48d1a5f13c449d4ec908"
+
+# Production route (configure after first deploy)
+# routes = [
+#   { pattern = "cascade.uppercervicalcare.com/*", zone_name = "uppercervicalcare.com" }
+# ]
+
+# Development settings
+[dev]
+port = 8787
+local_protocol = "http"

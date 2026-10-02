@@ -1,345 +1,239 @@
 # ZIP Cascade Automation Service — Design Document
 
-**Status:** DESIGN — awaiting approval before build
+**Status:** BUILT — deployed to Cloudflare Workers
 **Created:** Sept 30, 2026
+**Deployed:** Oct 2, 2026
 
 ---
 
 ## Goal
 
-When a patient lead goes unanswered (72hr) or declined, automatically re-match it to up to 5
-nearby doctors in BD, and tell GHL who those doctors are so they can be enrolled in a
-reminder sequence.
+When a patient lead expires or is declined, give the patient a choice: wait, or be connected
+to another doctor. If they choose reroute, the ZIP Cascade Worker finds nearby doctors in BD
+and matches them to the lead.
+
+**Design Change (Oct 2, 2026):** Cascade is NOT automatic at 72hr. The patient receives a
+choice email and the Worker fires only when they click "Connect me with another doctor"
+(trigger link → Patient Chose Reroute workflow).
 
 ---
 
-## 1. BD API Credentials & Scopes
+## Open Questions — RESOLVED
 
-**Where to get them:**
-BD Admin → Developer Hub → Generate API Key
+| # | Question | Answer |
+|---|----------|--------|
+| 1 | Does POST /api/v2/leads/match work on expired/declined leads? | **YES** — tested Oct 2, 2026. Lead 9602 (declined) successfully matched to ZZTest2 via API. New match created with `lead_matched_by: "API"`, `lead_status: 1`. |
+| 2 | Does BD expose proximity search via API? | **NO** — we compute Haversine distance ourselves |
+| 3 | Do user records include lat/lng coordinates? | **YES** — fields are `lat` and `lon` (not `lng`). Audit of 1,048 members shows all have valid coordinates. |
+| 4 | What are the lead match status values? | 1 = Pending, 2 = Accepted, 3 = Declined |
 
-**Authentication:**
-All requests use `X-Api-Key` header with the generated token.
+---
+
+## Selection Rule (Updated)
+
+Original design said "up to 5 doctors." Billy clarified:
+
+- **Level 2+ in range:** Match **EXACTLY ONE** (nearest). Level 2+ gets instant full delivery
+  (auto-accept), so matching multiple means multiple practices calling the same patient.
+- **No Level 2+ in range:** Match **up to 5 Annual/Unverified** (nearest first). They must pay
+  $50 to accept, so only serious interest responds.
+
+---
+
+## Why `has_level2` Matters
+
+When a Level 2+ doctor is auto-matched, BD does **NOT** fire an accept/decline webhook.
+GHL would never know the patient was connected. The worker reports `has_level2: true` so GHL can:
+- Mark the opportunity as Accepted
+- Stop the patient waiting sequence
+- Skip the "we couldn't find anyone" email
+
+---
+
+## Architecture
+
+```
+┌──────────────────┐                              ┌──────────────────────┐
+│  Patient         │   clicks "connect me         │                      │
+│  Expiration      │   with another doctor"       │  Patient Chose       │
+│  Watch           │ ─────────────────────────────▶  Reroute Workflow    │
+│  (sends choice   │   (trigger link)             │                      │
+│   email at 72hr) │                              └──────────┬───────────┘
+└──────────────────┘                                         │
+                                                             │ POST cascade_trigger
+                                                             ▼
+                                              ┌──────────────────────┐
+                                              │                      │
+                                              │  ZIP Cascade Worker  │
+                                              │  (Cloudflare)        │
+                                              │                      │
+                                              └──────────┬───────────┘
+                                                         │
+                         ┌───────────────────────────────┼───────────────────┐
+                         │                               │                   │
+                         ▼                               ▼                   ▼
+              ┌─────────────────┐            ┌─────────────────┐   ┌─────────────────┐
+              │  BD API         │            │  GHL Webhook    │   │  GHL Workflow   │
+              │  - GET members  │            │  (callback)     │   │  (handles       │
+              │  - GET lead     │            │                 │   │   result)       │
+              │  - POST match   │            └─────────────────┘   └─────────────────┘
+              └─────────────────┘
+```
+
+---
+
+## 1. BD API Credentials
+
+**API Key Name:** "Claude for BD"
+**Key Location:** BD Admin → Developer Hub → API Keys
+**Authentication:** `X-Api-Key` header
 
 **Permissions required:**
-BD Admin → Developer Hub → [Your API Key] → Actions → Permissions
 - Leads: Read, Match
-- Users: Read (to query doctors by location/plan)
+- Users: Read
 
-**Example request:**
-```bash
-curl -X GET 'https://uppercervicalcare.com/api/v2/leads/get/123' \
-  -H 'X-Api-Key: YOUR_API_KEY'
-```
-
-**Source:** [BD API Overview](https://support.brilliantdirectories.com/support/solutions/articles/12000088887-api-overview-and-testing-the-api-from-admin-area)
+**Worker Secret:** `BD_API_KEY` (set via `wrangler secret put BD_API_KEY`)
 
 ---
 
-## 2. POST /api/v2/leads/match on Expired Leads
+## 2. GHL Webhook
 
-**Endpoint:** `POST /api/v2/leads/match`
-
-**Parameters:**
-```json
-{
-  "lead_id": "9630",
-  "users_to_match": "doctor1@example.com,doctor2@example.com"
-}
+**Inbound Webhook URL:**
+```
+https://services.leadconnectorhq.com/hooks/o9QyWbMfXVHpNIYVzOI5/webhook-trigger/25063aa2-9437-44e6-9608-2522d09edeb1
 ```
 
-**What it does:** Adds new matches to the specified lead. Original matches remain.
-
-### ⚠️ OPEN QUESTION
-
-**Does this work on a lead whose original matches have expired or been declined?**
-
-The documentation does not explicitly address this. The lead has a `status` field (numeric),
-but status values are not documented.
-
-**Recommendation:** Test manually before building:
-1. Find an expired lead in BD admin
-2. Try POST /api/v2/leads/match via API tester in Developer Hub
-3. Confirm the new doctors receive notifications
-
-**Source:** [Leads API Documentation](https://support.brilliantdirectories.com/support/solutions/articles/12000091106-leads-api-how-to-edit-lead-data-with-api-calls)
+**Worker Secret:** `GHL_WEBHOOK_URL` (set via `wrangler secret put GHL_WEBHOOK_URL`)
 
 ---
 
-## 3. Getting Candidate Doctors Within 50 Miles
+## 3. Input Payload (GHL → Worker)
 
-### What BD API Offers
+```json
+{
+  "lead_id": "9602",
+  "lead_email": "patient@example.com",
+  "lead_name": "John Smith",
+  "lead_location": "Chandler, AZ",
+  "lat": "33.3061605",
+  "lng": "-111.8412502",
+  "checkPageType": "cascade_trigger"
+}
+```
 
-**GET /api/v2/user/get** — list/filter members
-
-Can filter by:
-- `subscription_id` (plan ID)
-- `city`, `state_code`, `country_code`
-- `active` status
-
-**Cannot filter by:** radius, lat/lng proximity
-
-**Source:** [listUsers MCP Tool](https://glama.ai/mcp/servers/brilliantdirectories/brilliant-directories-mcp/tools/listUsers)
-
-### ⚠️ OPEN QUESTION
-
-**Does BD expose a member search by proximity via API?**
-
-The `/search` endpoint exists for frontend use with an `address` parameter, but:
-- Full API access is unclear
-- May require "Pretty URL advanced setup"
-- Radius parameter not documented in API context
-
-**Source:** [How to Search Members via API](https://support.brilliantdirectories.com/support/solutions/articles/12000102884-how-to-search-for-members-through-the-api)
-
-### Fallback: Compute Distance Ourselves
-
-If no proximity API exists:
-
-1. **Pull all active doctors** with GET /api/v2/user/get
-   - Filter: `active=1` and `subscription_id` in Level 2+ or Annual/Unverified plans
-   - Response includes: `user_id`, `email`, `subscription_id`, `city`, `state_code`
-
-2. **Get doctor coordinates** — each user record should have lat/lng (needs verification)
-
-3. **Exclude 0,0 coordinates** — members with `lat=0.00, lng=0.00` are invisible to matching
-
-4. **Compute Haversine distance** from patient coordinates to each doctor
-
-5. **Sort by distance**, take nearest 5 within 50 miles
-
-6. **Prioritize by tier:**
-   - First: Level 2+ (plans 2, 18, 19, 23, 26, 27, 29, 33)
-   - Fallback: Annual/Unverified (plans 3, 31) if no Level 2+ within radius
-
-**Performance note:** ~700-900 doctors in directory. Fetching all and computing distance
-is acceptable for cascade frequency (a few per day). Cache doctor list if needed.
+If `lat`/`lng` missing or invalid, worker fetches from BD lead record.
 
 ---
 
-## 4. Getting Patient Coordinates
+## 4. Output Payload (Worker → GHL)
 
-### Option A: From Lead Accept/Decline Payload (already have)
-
-The accept/decline webhook payload includes:
-```json
-{
-  "lead": {
-    "lat": "27.7676",
-    "lng": "-82.6403",
-    "lead_location": "33701"
-  }
-}
-```
-
-**Problem:** Cascade triggers on expiration (no accept/decline), so we may not have this.
-
-### Option B: GET /api/v2/leads/get/{lead_id}
-
-Response includes:
-```json
-{
-  "lat": "37.09024",
-  "lng": "-95.712891",
-  "lead_location": "United States"
-}
-```
-
-**This is the reliable path.** Service fetches lead by ID to get coordinates.
-
-### Option C: Geocode the text location
-
-If lat/lng are null/zero, geocode `lead_location` (ZIP or city) via Google Maps API.
-
-**Recommendation:** Option B first, fall back to C if coordinates are 0,0.
-
----
-
-## 5. Where the Service Runs
-
-### Recommendation: Cloudflare Workers
-
-| Criteria | Cloudflare Workers |
-|----------|-------------------|
-| Cost | Free tier: 100k requests/day |
-| Complexity | Single JS file, no server management |
-| Latency | Edge deployment, fast |
-| UCC ownership | Easy transfer (Cloudflare account) |
-| Secrets | Workers Secrets for API keys |
-
-**Alternative:** AWS Lambda + API Gateway
-- More powerful, but more complex
-- Higher learning curve for UCC team
-
-**Alternative:** Simple Node.js on Railway/Render
-- Easy to understand
-- $5-10/month
-- Traditional server model
-
-### My Recommendation
-
-**Cloudflare Workers** — simplest, cheapest, easiest to transfer.
-
-The service is stateless (receives webhook, calls BD API, calls GHL webhook, done).
-No database needed. Perfect fit for edge functions.
-
----
-
-## 6. Exact Payloads
-
-### GHL → Service (Cascade Trigger)
-
-Sent by Patient Expiration Watch or Patient Watch Stop via Custom Webhook action.
+### Success — Match Found
 
 ```json
 {
-  "event": "cascade_trigger",
-  "lead_id": "9630",
-  "patient_email": "patient@example.com",
-  "patient_name": "John Smith",
-  "patient_phone": "555-123-4567",
-  "patient_location": "33701",
-  "original_doctor_email": "drsmith@clinic.com",
-  "opportunity_id": "opp_abc123",
-  "trigger_reason": "expired" | "declined"
-}
-```
-
-### Service → BD API
-
-**Step 1: Get lead coordinates**
-```
-GET /api/v2/leads/get/9630
-→ Extract lat, lng
-```
-
-**Step 2: Get candidate doctors** (if no proximity API)
-```
-GET /api/v2/user/get?property=active&property_value=1
-→ Filter by subscription_id, compute distance, sort
-```
-
-**Step 3: Match lead to doctors**
-```
-POST /api/v2/leads/match
-{
-  "lead_id": "9630",
-  "users_to_match": "dr1@clinic.com,dr2@clinic.com,dr3@clinic.com"
-}
-```
-
-### Service → GHL (Cascade Result)
-
-Sent to a new GHL Inbound Webhook trigger.
-
-```json
-{
-  "event": "cascade_matched",
-  "lead_id": "9630",
-  "patient_email": "patient@example.com",
-  "opportunity_id": "opp_abc123",
+  "lead_id": "9602",
+  "lead_email": "patient@example.com",
+  "matched_doctor_emails": ["doctor@clinic.com"],
   "matched_doctors": [
     {
-      "email": "dr1@clinic.com",
-      "name": "Dr. Jane Baker",
-      "tier": "level2",
-      "distance_miles": 12.4
-    },
-    {
-      "email": "dr2@clinic.com",
-      "name": "Dr. Bob Wilson",
-      "tier": "annual",
-      "distance_miles": 23.1
+      "email": "doctor@clinic.com",
+      "name": "Dr. Jane Smith",
+      "distance_miles": 12.4,
+      "tier": "level2"
     }
   ],
   "has_level2": true,
-  "match_count": 5
+  "match_count": 1,
+  "status": "matched"
 }
 ```
 
-**GHL workflow branches on `has_level2`:**
-- `true` → Set opportunity to Accepted immediately, stop patient emails
-- `false` → Normal 48hr accept window applies
+### No Doctors in Range
 
----
-
-## 7. Failure Handling
-
-### No Eligible Doctors Within 50 Miles
-
-**Service → GHL:**
 ```json
 {
-  "event": "cascade_failed",
-  "lead_id": "9630",
-  "patient_email": "patient@example.com",
-  "opportunity_id": "opp_abc123",
-  "reason": "no_doctors_in_radius",
-  "searched_radius_miles": 50
+  "lead_id": "9602",
+  "lead_email": "patient@example.com",
+  "matched_doctor_emails": [],
+  "has_level2": false,
+  "match_count": 0,
+  "status": "no_doctors_in_range"
 }
 ```
 
-**GHL workflow:**
-- Update opportunity stage → "Cascade Failed - No Doctors"
-- Send patient email: "We couldn't find doctors near you. Please search our directory."
-- Tag: `cascade-no-match`
-- Optionally: Slack alert to Constansa for manual intervention
+### Error
 
-### BD API Error
-
-**Service → GHL:**
 ```json
 {
-  "event": "cascade_error",
-  "lead_id": "9630",
-  "error": "BD API returned 500",
-  "retry_eligible": true
-}
-```
-
-**GHL workflow:**
-- Tag: `cascade-error`
-- Slack alert for manual review
-
-### Lead Already Has Active Matches
-
-If BD returns error because lead has active (non-expired) matches:
-
-**Service → GHL:**
-```json
-{
-  "event": "cascade_skipped",
-  "lead_id": "9630",
-  "reason": "active_matches_exist"
+  "lead_id": "9602",
+  "lead_email": "patient@example.com",
+  "matched_doctor_emails": [],
+  "has_level2": false,
+  "match_count": 0,
+  "status": "error",
+  "error_message": "Lead has no valid coordinates"
 }
 ```
 
 ---
 
-## Open Questions Summary
+## 5. GHL Workflow Logic
 
-| # | Question | Impact | How to Resolve |
-|---|----------|--------|----------------|
-| 1 | Does POST /api/v2/leads/match work on expired leads? | Blocking | Test manually in BD API tester |
-| 2 | Does BD expose proximity search via API? | Architecture | Test /search endpoint with address param |
-| 3 | Do user records include lat/lng coordinates? | Distance calc | Check GET /api/v2/user/get response |
-| 4 | What are the lead status values? | Logic | Check BD docs or test |
+### Trigger Flow
+
+1. **Patient Expiration Watch** (72hr after lead created):
+   - Sends patient a choice email with two trigger links:
+     - "Connect me with another doctor" → triggers **Patient Chose Reroute** workflow
+     - "I'll wait" / no action → lead stays in current state
+
+2. **Patient Chose Reroute** workflow:
+   - Triggered by patient clicking the reroute link
+   - Calls ZIP Cascade Worker via Custom Webhook
+   - Passes: `lead_id`, `lead_email`, `lat`, `lng` (from contact custom fields)
+
+3. **Cascade Result Handler** (inbound webhook from Worker):
+
+| `status` | `has_level2` | GHL Action |
+|----------|--------------|------------|
+| `matched` | `true` | Move opportunity to "Accepted" stage, send confirmation |
+| `matched` | `false` | Move to "Rerouted - Round 2", start 48hr cascade wait |
+| `no_doctors_in_range` | — | Move to "Cascade Failed", send directory email to patient |
+| `error` | — | Tag `cascade-error`, alert for manual review |
+
+### Required Contact Custom Fields
+
+Create in B2C sub-account, folder "Lead Automation":
+- `lead_id` (text) — BD lead ID
+- `lead_lat` (text) — patient latitude
+- `lead_lng` (text) — patient longitude
+
+These fields are populated when the lead is created and passed to the Worker.
 
 ---
 
-## File Structure (after approval)
+## 6. Plan IDs
+
+**Level 2+** (full access, auto-accept):
+- 2, 18, 19, 23, 26, 27, 29, 33
+
+**Annual/Unverified** ($50 accept/decline):
+- 3 (Unverified Doctor)
+- 31 (Level 1 Annual)
+
+---
+
+## 7. File Structure
 
 ```
 ucc-automation-os/
 ├── code/
 │   └── zip-cascade-service/
-│       ├── index.js          # Cloudflare Worker entry point
-│       ├── wrangler.toml     # Cloudflare config (no secrets)
-│       ├── lib/
-│       │   ├── bd-api.js     # BD API client
-│       │   ├── ghl-webhook.js # GHL webhook sender
-│       │   ├── distance.js   # Haversine calculation
-│       │   └── tier-logic.js # Plan ID → tier mapping
+│       ├── src/
+│       │   ├── index.js      # Worker entry point
+│       │   ├── haversine.js  # Distance calculation
+│       │   └── bd-api.js     # BD API client
+│       ├── wrangler.toml     # Cloudflare config
+│       ├── package.json
 │       └── README.md         # Setup & deployment guide
 ├── ghl/
 │   └── zip-cascade-service-design.md  # This document
@@ -347,18 +241,62 @@ ucc-automation-os/
 
 ---
 
-## Next Steps (after approval)
+## 8. Deployment
 
-1. Resolve open questions 1-4 via BD API testing
-2. Create Cloudflare account (or choose alternative)
-3. Build service
-4. Create GHL workflows:
-   - Cascade Trigger (fires Custom Webhook to service)
-   - Cascade Result Handler (receives match results)
-   - Cascade Failure Handler
-5. Test end-to-end with a real expired lead
-6. Document deployment in README
+### Prerequisites
+
+```bash
+npm install -g wrangler
+wrangler login
+```
+
+### Deploy
+
+```bash
+cd code/zip-cascade-service
+npm install
+wrangler secret put BD_API_KEY      # Paste BD API key
+wrangler secret put GHL_WEBHOOK_URL # Paste GHL webhook URL
+npm run deploy
+```
+
+### Worker URL
+
+**Production URL:**
+```
+https://zip-cascade.ucc-automation.workers.dev
+```
+
+This URL goes into the GHL workflow's Custom Webhook action.
 
 ---
 
-*Awaiting approval before build.*
+## 9. Testing
+
+### Local
+
+```bash
+npm run dev
+curl -X POST http://localhost:8787 \
+  -H "Content-Type: application/json" \
+  -d '{"lead_id":"9602","lat":"33.3061","lng":"-111.84"}'
+```
+
+### Production
+
+Use a test lead (e.g., from ZZTEST) that has been declined or expired.
+
+---
+
+## 10. Monitoring
+
+View live logs:
+```bash
+npm run tail
+```
+
+Or: Cloudflare Dashboard → Workers & Pages → zip-cascade → Logs
+
+---
+
+*Built and deployed Oct 2, 2026.*

@@ -77,7 +77,7 @@ Full spec: `docs/workflow-specification.md` (Workflows 1–9). Read it before de
 - Proprietary campaign methodology stays in the separate `profile-drive-os` repo — never here.
   This repo transfers to UCC.
 
-## Current build status (Sep 25, 2026)
+## Current build status (Oct 2, 2026)
 
 See `docs/build-status.md` for full detail.
 
@@ -87,19 +87,16 @@ See `docs/build-status.md` for full detail.
 - [x] Lead Accept Decline Handler (with working Patient Watch Stop relay — nested paths fixed)
 - [x] Patient Leads pipeline (3 real opportunities in Awaiting Response as of today)
 - [x] tier-annual tag coverage: 705 members audited, 555 gaps fixed, 0 failures
-
-**PUBLISHING TODAY:**
-- [ ] Patient Watch Stop (relay → Remove From Workflow → Update Opp stage)
-- [ ] Patient Expiration Watch (72hr wait → patient notification → Opp "Expired - No Response")
-- Publish order: Stop first, then Watch
+- [x] ZIP Cascade Worker deployed to Cloudflare (`https://zip-cascade.ucc-automation.workers.dev`)
+- [x] BD member coordinate audit: 1,048 members, all have valid lat/lon
 
 **NEXT:**
-- [ ] Patient instant-confirmation email (first action in Patient Watch — pending copy)
-- [ ] BD Sign Up Auto-Tagger (closes standing leak for new Plan 3/31 signups — promoted from phase 2)
-- [ ] End-to-end test results to be logged
+- [ ] Patient Expiration Watch: add choice email with trigger links (reroute vs wait)
+- [ ] Patient Chose Reroute workflow: trigger link → calls ZIP Cascade Worker
+- [ ] GHL custom fields: `lead_id`, `lead_lat`, `lead_lng` in Lead Automation folder
+- [ ] BD Sign Up Auto-Tagger (closes standing leak for new Plan 3/31 signups)
 
-**PHASE 2 (unchanged):**
-- [ ] ZIP fallback cascade (Find-a-Doctor expiration email ships as v1 patient path) — BLOCKED on Maximum Matches
+**PHASE 2:**
 - [ ] Nurture sequences
 - [ ] Escalation queue
 - [ ] Dashboard / tracking view
@@ -107,4 +104,5 @@ See `docs/build-status.md` for full detail.
 **OPEN:**
 - [ ] jordan template fix in BD
 - [ ] info@uppercervicalcare.com — Billy to confirm who monitors; reply-to for reminder emails
+- [ ] GHL API token needs regenerating (returned invalid Oct 2, 2026)
 - [ ] Handover docs + ownership transfer
