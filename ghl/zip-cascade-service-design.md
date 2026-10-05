@@ -267,7 +267,25 @@ npm run deploy
 https://zip-cascade.ucc-automation.workers.dev
 ```
 
-This URL goes into the GHL workflow's Custom Webhook action.
+### Endpoints
+
+| Endpoint | Method | Use Case | Response |
+|----------|--------|----------|----------|
+| `/` | POST | GHL webhook integration | JSON |
+| `/reroute` | GET | Patient email button link | HTML page |
+
+### GET /reroute (Patient-facing)
+
+Bypasses GHL trigger links entirely — link directly from patient email button.
+
+```
+https://zip-cascade.ucc-automation.workers.dev/reroute?lead_id={{lead_id}}&lat={{lead_lat}}&lng={{lead_lng}}&email={{lead_email}}
+```
+
+**Why this exists:** GHL trigger links require a link-tracking domain. This endpoint
+lets the patient choice email link directly to the Worker, avoiding that dependency.
+
+**Response:** Clean HTML confirmation page with "We're On It" headline.
 
 ---
 

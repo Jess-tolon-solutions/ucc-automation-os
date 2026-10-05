@@ -25,34 +25,218 @@ const MEMBER_CACHE_TTL = 60 * 60;
 
 export default {
   async fetch(request, env, ctx) {
-    // Only accept POST
-    if (request.method !== 'POST') {
-      return new Response(JSON.stringify({ error: 'Method not allowed' }), {
-        status: 405,
-        headers: { 'Content-Type': 'application/json' }
-      });
+    const url = new URL(request.url);
+
+    // GET /reroute - Patient-facing endpoint (returns HTML)
+    if (request.method === 'GET' && url.pathname === '/reroute') {
+      return handleRerouteGet(url, env, ctx);
     }
 
-    try {
-      const payload = await request.json();
-      const result = await handleCascade(payload, env, ctx);
-
-      return new Response(JSON.stringify(result), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' }
-      });
-    } catch (error) {
-      console.error('Cascade error:', error);
-      return new Response(JSON.stringify({
-        error: error.message,
-        status: 'error'
-      }), {
-        status: 500,
-        headers: { 'Content-Type': 'application/json' }
-      });
+    // POST / - GHL webhook endpoint (returns JSON)
+    if (request.method === 'POST') {
+      return handlePost(request, env, ctx);
     }
+
+    // Method not allowed
+    return new Response(JSON.stringify({ error: 'Method not allowed' }), {
+      status: 405,
+      headers: { 'Content-Type': 'application/json' }
+    });
   }
 };
+
+/**
+ * Handle GET /reroute - Patient clicks email link
+ */
+async function handleRerouteGet(url, env, ctx) {
+  const lead_id = url.searchParams.get('lead_id');
+  const lat = url.searchParams.get('lat');
+  const lng = url.searchParams.get('lng');
+  const email = url.searchParams.get('email');
+
+  if (!lead_id) {
+    return new Response(renderErrorPage('Missing lead information'), {
+      status: 400,
+      headers: { 'Content-Type': 'text/html; charset=utf-8' }
+    });
+  }
+
+  try {
+    const result = await handleCascade({
+      lead_id,
+      lead_email: email,
+      lat,
+      lng
+    }, env, ctx);
+
+    // Return confirmation page regardless of match outcome
+    // (GHL callback handles the workflow logic)
+    return new Response(renderConfirmationPage(result), {
+      status: 200,
+      headers: { 'Content-Type': 'text/html; charset=utf-8' }
+    });
+  } catch (error) {
+    console.error('Reroute error:', error);
+    return new Response(renderErrorPage('Something went wrong. Please try again later.'), {
+      status: 500,
+      headers: { 'Content-Type': 'text/html; charset=utf-8' }
+    });
+  }
+}
+
+/**
+ * Handle POST / - GHL webhook
+ */
+async function handlePost(request, env, ctx) {
+  try {
+    const payload = await request.json();
+    const result = await handleCascade(payload, env, ctx);
+
+    return new Response(JSON.stringify(result), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  } catch (error) {
+    console.error('Cascade error:', error);
+    return new Response(JSON.stringify({
+      error: error.message,
+      status: 'error'
+    }), {
+      status: 500,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  }
+}
+
+/**
+ * Render confirmation page HTML
+ */
+function renderConfirmationPage(result) {
+  const statusMessage = result.status === 'no_doctors_in_range'
+    ? "We're searching our network for doctors in your area. If we find a match, they'll reach out to you directly."
+    : "We're reaching out to doctors near you. You should hear from one shortly.";
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>We're On It | Upper Cervical Care</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background: #f8f9fa;
+      color: #333;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+    .container {
+      background: white;
+      border-radius: 8px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+      padding: 48px 40px;
+      max-width: 480px;
+      text-align: center;
+    }
+    h1 {
+      font-size: 28px;
+      font-weight: 600;
+      color: #1a1a1a;
+      margin-bottom: 16px;
+    }
+    p {
+      font-size: 16px;
+      line-height: 1.6;
+      color: #555;
+      margin-bottom: 24px;
+    }
+    .signature {
+      font-size: 14px;
+      color: #888;
+      margin-top: 32px;
+      padding-top: 24px;
+      border-top: 1px solid #eee;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>We're On It</h1>
+    <p>${statusMessage}</p>
+    <p>Thank you for your patience.</p>
+    <div class="signature">
+      — The Upper Cervical Care Team
+    </div>
+  </div>
+</body>
+</html>`;
+}
+
+/**
+ * Render error page HTML
+ */
+function renderErrorPage(message) {
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Error | Upper Cervical Care</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background: #f8f9fa;
+      color: #333;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+    .container {
+      background: white;
+      border-radius: 8px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+      padding: 48px 40px;
+      max-width: 480px;
+      text-align: center;
+    }
+    h1 {
+      font-size: 24px;
+      font-weight: 600;
+      color: #1a1a1a;
+      margin-bottom: 16px;
+    }
+    p {
+      font-size: 16px;
+      line-height: 1.6;
+      color: #555;
+    }
+    .signature {
+      font-size: 14px;
+      color: #888;
+      margin-top: 32px;
+      padding-top: 24px;
+      border-top: 1px solid #eee;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Oops</h1>
+    <p>${message}</p>
+    <div class="signature">
+      — The Upper Cervical Care Team
+    </div>
+  </div>
+</body>
+</html>`;
+}
 
 /**
  * Main cascade logic

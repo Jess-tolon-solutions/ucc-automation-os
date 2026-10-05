@@ -2,14 +2,33 @@
 
 Cloudflare Worker that handles the ZIP cascade lead matching for UpperCervicalCare.com.
 
-When a patient lead expires or is declined, GHL triggers this worker. The worker finds
-nearby doctors in the BD directory and matches them to the lead, then calls back to GHL
-with the results.
+When a patient chooses to be rerouted to another doctor, this worker finds nearby doctors
+in the BD directory and matches them to the lead, then calls back to GHL with the results.
+
+## Endpoints
+
+### GET /reroute (Patient-facing)
+
+Used directly in patient emails as a button link. Avoids GHL trigger link dependency.
+
+```
+https://zip-cascade.ucc-automation.workers.dev/reroute?lead_id=123&lat=33.30&lng=-111.84&email=patient@example.com
+```
+
+**Query params:** `lead_id` (required), `lat`, `lng`, `email`
+
+**Returns:** HTML confirmation page ("We're On It")
+
+### POST / (GHL webhook)
+
+JSON API for GHL workflow integration.
+
+**Returns:** JSON with match results
 
 ## How It Works
 
-1. **Input**: POST from GHL with lead info (lead_id, lat, lng, etc.)
-2. **Fetch members**: Pull all BD members (cached for 1 hour)
+1. **Input**: GET /reroute (patient click) or POST / (GHL webhook)
+2. **Fetch members**: Pull all BD members (cached for 24 hours)
 3. **Filter by distance**: Haversine calculation, keep members within 50 miles
 4. **Exclude existing matches**: Don't re-match to doctors already on this lead
 5. **Selection rule**:
@@ -17,6 +36,7 @@ with the results.
    - Otherwise → match up to **5 Annual/Unverified** (nearest first)
 6. **Match via BD API**: POST /api/v2/leads/match
 7. **Callback to GHL**: Report results so GHL can update the opportunity
+8. **Response**: HTML page (GET) or JSON (POST)
 
 ## Why Level 2+ Gets Only One Match
 
