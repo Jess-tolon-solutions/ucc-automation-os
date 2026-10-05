@@ -2,6 +2,58 @@
 
 Dated record of non-obvious choices. Newest first.
 
+## 2026-10-05 — Round 2 doctor notices require separate workflow
+
+GHL workflows cannot loop over an array. The Worker callback includes
+`matched_doctor_emails` as an array (up to 5 doctors), but GHL has no native
+way to iterate and send an email to each.
+
+**Solution:** Modify the Worker to POST once per matched doctor instead of once
+per lead. Each POST triggers the Round 2 Doctor Notice workflow for that single
+doctor. Deferred until patient-side flows are verified working.
+
+## 2026-10-05 — Patient Chose Reroute workflow is dormant
+
+The patient click now goes directly to the Worker (`/r/:lead_id`), bypassing GHL
+entirely. The Worker callbacks to Cascade Result, which handles tagging and
+opportunity stage updates.
+
+**Patient Chose Reroute** remains in the account but does nothing. All its logic
+(tag `patient-wants-reroute`, opportunity lookup, stage update) moved to
+**Cascade Result**.
+
+## 2026-10-05 — Patient emails: plain text in-workflow, not branded templates
+
+All patient-facing emails are now written directly in the workflow step as plain
+text, not pulled from branded Email Templates.
+
+**Reasons:**
+- Templates create a snapshot problem: editing the template does not update
+  workflow steps that reference it
+- Plain text has better deliverability than HTML-heavy branded templates
+- Matches UCC's conversational voice
+- Branded templates were only needed for styled buttons, which we no longer use
+  (links go directly to the Worker)
+
+## 2026-10-05 — BLOCKER: email.visitors.uppercervicalcare.com has no DNS
+
+Every link in every B2C email is broken. GHL rewrites all links through the
+tracking domain `email.visitors.uppercervicalcare.com`, which has **no DNS
+records**. Clicks resolve nowhere.
+
+**Scope:** Affects all B2C emails, not just our workflows. 21 patients received
+dead-link rerouting emails. Zero click data exists.
+
+**Root cause:** GHL's domain validation checks mail delivery (MX), not click
+tracking (A/CNAME). The domain shows "All Set" despite the missing record.
+
+**Fix:** Add one CNAME record for `email.visitors` pointing at GHL's tracking
+endpoint. Value is shown in GHL Settings → Domains. DNS is at
+`ns1.directorysecure.com` / `ns2.directorysecure.com`.
+
+**Workaround:** None. Per-email and account-level link-tracking toggles do not
+prevent rewriting. Plain-text URLs are also rewritten.
+
 ## 2026-10-02 — GHL API token invalid; needs regeneration
 
 The GHL Private Integration token (`pit-d96d2a95-...`) returned 401 Invalid during this
