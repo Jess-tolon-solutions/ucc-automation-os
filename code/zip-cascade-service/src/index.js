@@ -422,7 +422,10 @@ async function handleCascade(payload, env, ctx) {
     });
   }
 
-  // Success - send callback to GHL
+  // Success - notify each matched doctor (one POST per doctor)
+  await sendDoctorNotices(env.DOCTOR_NOTICE_WEBHOOK_URL, lead_id, emailsToMatch);
+
+  // Send callback to GHL
   const hasLevel2 = selectedMembers.some(m => m.is_level2);
 
   const result = {
@@ -490,6 +493,39 @@ async function getExistingMatches(bdClient, leadId) {
   } catch (error) {
     console.error('Error fetching existing matches:', error);
     return [];
+  }
+}
+
+/**
+ * Send doctor notice to each matched doctor (one POST per doctor)
+ */
+async function sendDoctorNotices(webhookUrl, lead_id, doctorEmails) {
+  if (!webhookUrl) {
+    console.log('No doctor notice webhook URL configured, skipping');
+    return;
+  }
+
+  if (!doctorEmails || doctorEmails.length === 0) {
+    return;
+  }
+
+  console.log(`Sending doctor notices for lead ${lead_id} to ${doctorEmails.length} doctors`);
+
+  for (const doctorEmail of doctorEmails) {
+    try {
+      const response = await fetch(webhookUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: doctorEmail,
+          lead_id: lead_id
+        })
+      });
+
+      console.log(`Doctor notice to ${doctorEmail}: ${response.status}`);
+    } catch (error) {
+      console.error(`Doctor notice to ${doctorEmail} failed:`, error);
+    }
   }
 }
 

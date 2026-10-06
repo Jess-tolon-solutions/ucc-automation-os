@@ -84,7 +84,10 @@ wrangler secret put BD_API_KEY
 # Paste the BD API key when prompted
 
 wrangler secret put GHL_WEBHOOK_URL
-# Paste the GHL inbound webhook URL when prompted
+# Paste the GHL inbound webhook URL for Cascade Result
+
+wrangler secret put DOCTOR_NOTICE_WEBHOOK_URL
+# Paste the GHL inbound webhook URL for Round 2 Doctor Notice
 ```
 
 ### 5. (Optional) Create KV Cache
