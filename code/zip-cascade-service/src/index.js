@@ -27,7 +27,13 @@ export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
 
-    // GET /reroute - Patient-facing endpoint (returns HTML)
+    // GET /r/:lead_id - Short URL, looks up lead data from BD
+    const shortMatch = url.pathname.match(/^\/r\/(\d+)$/);
+    if (request.method === 'GET' && shortMatch) {
+      return handleShortReroute(shortMatch[1], env, ctx);
+    }
+
+    // GET /reroute - Patient-facing endpoint with query params (returns HTML)
     if (request.method === 'GET' && url.pathname === '/reroute') {
       return handleRerouteGet(url, env, ctx);
     }
@@ -44,6 +50,42 @@ export default {
     });
   }
 };
+
+/**
+ * Handle GET /r/:lead_id - Short URL, looks up lead from BD
+ */
+async function handleShortReroute(lead_id, env, ctx) {
+  if (!lead_id) {
+    return new Response(renderErrorPage('Missing lead information'), {
+      status: 400,
+      headers: { 'Content-Type': 'text/html; charset=utf-8' }
+    });
+  }
+
+  try {
+    // Look up lead from BD API
+    const bdClient = new BDClient(env.BD_API_KEY);
+    const lead = await bdClient.getLead(lead_id);
+
+    const result = await handleCascade({
+      lead_id,
+      lead_email: lead.lead_email,
+      lat: lead.lat,
+      lng: lead.lng
+    }, env, ctx);
+
+    return new Response(renderConfirmationPage(result), {
+      status: 200,
+      headers: { 'Content-Type': 'text/html; charset=utf-8' }
+    });
+  } catch (error) {
+    console.error('Short reroute error:', error);
+    return new Response(renderErrorPage('Something went wrong. Please try again later.'), {
+      status: 500,
+      headers: { 'Content-Type': 'text/html; charset=utf-8' }
+    });
+  }
+}
 
 /**
  * Handle GET /reroute - Patient clicks email link
@@ -266,6 +308,7 @@ async function handleCascade(payload, env, ctx) {
       // No valid coordinates - cannot match by distance
       return await sendGHLCallback(env.GHL_WEBHOOK_URL, {
         lead_id,
+        email: lead_email,
         lead_email,
         matched_doctor_emails: [],
         has_level2: false,
@@ -350,6 +393,7 @@ async function handleCascade(payload, env, ctx) {
     console.log('No doctors in range');
     return await sendGHLCallback(env.GHL_WEBHOOK_URL, {
       lead_id,
+      email: lead_email,
       lead_email,
       matched_doctor_emails: [],
       has_level2: false,
@@ -368,6 +412,7 @@ async function handleCascade(payload, env, ctx) {
     console.error('Match API error:', matchError);
     return await sendGHLCallback(env.GHL_WEBHOOK_URL, {
       lead_id,
+      email: lead_email,
       lead_email,
       matched_doctor_emails: [],
       has_level2: false,
@@ -382,6 +427,7 @@ async function handleCascade(payload, env, ctx) {
 
   const result = {
     lead_id,
+    email: lead_email,
     lead_email,
     matched_doctor_emails: emailsToMatch,
     matched_doctors: selectedMembers.map(m => ({
