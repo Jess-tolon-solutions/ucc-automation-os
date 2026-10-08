@@ -19,6 +19,10 @@ id = "bf69222a819e48d1a5f13c449d4ec908"
 #   { pattern = "cascade.uppercervicalcare.com/*", zone_name = "uppercervicalcare.com" }
 # ]
 
+# Cron trigger - rebuild member cache daily at 3am UTC
+[triggers]
+crons = ["0 3 * * *"]
+
 # Development settings
 [dev]
 port = 8787

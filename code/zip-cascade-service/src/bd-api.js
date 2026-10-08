@@ -5,6 +5,30 @@
  */
 
 const BD_BASE_URL = 'https://www.uppercervicalcare.com/api/v2';
+const FETCH_TIMEOUT_MS = 10000; // 10 seconds
+
+/**
+ * Fetch with timeout
+ */
+async function fetchWithTimeout(url, options, timeoutMs = FETCH_TIMEOUT_MS) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const response = await fetch(url, {
+      ...options,
+      signal: controller.signal
+    });
+    return response;
+  } catch (error) {
+    if (error.name === 'AbortError') {
+      throw new Error(`Request timed out after ${timeoutMs}ms: ${url}`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
 
 export class BDClient {
   constructor(apiKey) {
@@ -32,7 +56,8 @@ export class BDClient {
       options.body = new URLSearchParams(body).toString();
     }
 
-    const response = await fetch(url, options);
+    console.log(`BD API ${method} ${endpoint}`);
+    const response = await fetchWithTimeout(url, options);
 
     if (!response.ok) {
       throw new Error(`BD API error: ${response.status} ${response.statusText}`);

@@ -12,20 +12,59 @@
 import { haversineDistance } from './haversine.js';
 import { BDClient } from './bd-api.js';
 
-// Plan IDs by tier
+// Timeout for outbound webhook calls (ms)
+const WEBHOOK_TIMEOUT_MS = 10000;
+
+/**
+ * Fetch with timeout
+ */
+async function fetchWithTimeout(url, options, timeoutMs = WEBHOOK_TIMEOUT_MS) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const response = await fetch(url, {
+      ...options,
+      signal: controller.signal
+    });
+    return response;
+  } catch (error) {
+    if (error.name === 'AbortError') {
+      throw new Error(`Request timed out after ${timeoutMs}ms`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+// Plan IDs for Level 2+ (full access, auto-accept)
+// Only these tiers are eligible for cascade matching
 const LEVEL2_PLANS = ['2', '18', '19', '23', '26', '27', '29', '33'];
-const ANNUAL_UNVERIFIED_PLANS = ['3', '31'];
-const ALL_ELIGIBLE_PLANS = [...LEVEL2_PLANS, ...ANNUAL_UNVERIFIED_PLANS];
 
 // Search radius in miles
 const RADIUS_MILES = 50;
 
-// Cache TTL for member list (1 hour)
-const MEMBER_CACHE_TTL = 60 * 60;
+// Bounding box padding in degrees (1 degree ≈ 69 miles latitude, ~53 miles longitude at 40°N)
+// Using 1.0 degrees gives ~70 mile box, safely larger than 50 mile radius
+const BBOX_PADDING_DEG = 1.0;
+
+// Cache TTL for member list (25 hours - overlaps daily cron)
+const MEMBER_CACHE_TTL = 25 * 60 * 60;
 
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
+
+    // POST /cache/rebuild - Manual cache rebuild (for initial population)
+    if (request.method === 'POST' && url.pathname === '/cache/rebuild') {
+      return handleCacheRebuild(env);
+    }
+
+    // GET /cache/status - Check cache status
+    if (request.method === 'GET' && url.pathname === '/cache/status') {
+      return handleCacheStatus(env);
+    }
 
     // GET /r/:lead_id - Short URL, looks up lead data from BD
     const shortMatch = url.pathname.match(/^\/r\/(\d+)$/);
@@ -48,11 +87,19 @@ export default {
       status: 405,
       headers: { 'Content-Type': 'application/json' }
     });
+  },
+
+  // Cron trigger - runs daily at 3am UTC
+  async scheduled(event, env, ctx) {
+    console.log('Cron trigger: rebuilding member cache');
+    await rebuildMemberCache(env);
+    console.log('Cron trigger: cache rebuild complete');
   }
 };
 
 /**
  * Handle GET /r/:lead_id - Short URL, looks up lead from BD
+ * Returns confirmation page immediately, runs cascade in background
  */
 async function handleShortReroute(lead_id, env, ctx) {
   if (!lead_id) {
@@ -62,33 +109,40 @@ async function handleShortReroute(lead_id, env, ctx) {
     });
   }
 
+  // Return confirmation immediately - cascade runs in background
+  ctx.waitUntil(runShortRouteCascade(lead_id, env, ctx));
+
+  return new Response(renderConfirmationPage({ status: 'processing' }), {
+    status: 200,
+    headers: { 'Content-Type': 'text/html; charset=utf-8' }
+  });
+}
+
+/**
+ * Background cascade for /r/:lead_id route
+ */
+async function runShortRouteCascade(lead_id, env, ctx) {
   try {
-    // Look up lead from BD API
+    console.log(`Background cascade starting for lead ${lead_id}`);
     const bdClient = new BDClient(env.BD_API_KEY);
     const lead = await bdClient.getLead(lead_id);
 
-    const result = await handleCascade({
+    await handleCascade({
       lead_id,
       lead_email: lead.lead_email,
       lat: lead.lat,
       lng: lead.lng
     }, env, ctx);
 
-    return new Response(renderConfirmationPage(result), {
-      status: 200,
-      headers: { 'Content-Type': 'text/html; charset=utf-8' }
-    });
+    console.log(`Background cascade completed for lead ${lead_id}`);
   } catch (error) {
-    console.error('Short reroute error:', error);
-    return new Response(renderErrorPage('Something went wrong. Please try again later.'), {
-      status: 500,
-      headers: { 'Content-Type': 'text/html; charset=utf-8' }
-    });
+    console.error(`Background cascade failed for lead ${lead_id}:`, error.message);
   }
 }
 
 /**
  * Handle GET /reroute - Patient clicks email link
+ * Returns confirmation page immediately, runs cascade in background
  */
 async function handleRerouteGet(url, env, ctx) {
   const lead_id = url.searchParams.get('lead_id');
@@ -103,27 +157,20 @@ async function handleRerouteGet(url, env, ctx) {
     });
   }
 
-  try {
-    const result = await handleCascade({
-      lead_id,
-      lead_email: email,
-      lat,
-      lng
-    }, env, ctx);
+  // Return confirmation immediately - cascade runs in background
+  ctx.waitUntil(handleCascade({
+    lead_id,
+    lead_email: email,
+    lat,
+    lng
+  }, env, ctx).catch(err => {
+    console.error(`Background cascade failed for lead ${lead_id}:`, err.message);
+  }));
 
-    // Return confirmation page regardless of match outcome
-    // (GHL callback handles the workflow logic)
-    return new Response(renderConfirmationPage(result), {
-      status: 200,
-      headers: { 'Content-Type': 'text/html; charset=utf-8' }
-    });
-  } catch (error) {
-    console.error('Reroute error:', error);
-    return new Response(renderErrorPage('Something went wrong. Please try again later.'), {
-      status: 500,
-      headers: { 'Content-Type': 'text/html; charset=utf-8' }
-    });
-  }
+  return new Response(renderConfirmationPage({ status: 'processing' }), {
+    status: 200,
+    headers: { 'Content-Type': 'text/html; charset=utf-8' }
+  });
 }
 
 /**
@@ -154,9 +201,8 @@ async function handlePost(request, env, ctx) {
  * Render confirmation page HTML
  */
 function renderConfirmationPage(result) {
-  const statusMessage = result.status === 'no_doctors_in_range'
-    ? "We're searching our network for doctors in your area. If we find a match, they'll reach out to you directly."
-    : "We're reaching out to doctors near you. You should hear from one shortly.";
+  // Page always shows optimistic message - actual matching happens in background
+  const statusMessage = "We're reaching out to doctors near you. If we find a match, they'll be in touch shortly.";
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -319,28 +365,51 @@ async function handleCascade(payload, env, ctx) {
     }
   }
 
-  // Get all members (from cache if available)
-  const members = await getCachedMembers(bdClient, env, ctx);
-  console.log(`Loaded ${members.length} members`);
+  // Get members from KV cache (never crawls BD inline)
+  const members = await getCachedMembers(env);
+  if (!members) {
+    // Cache empty - cannot proceed with cascade
+    return await sendGHLCallback(env.GHL_WEBHOOK_URL, {
+      lead_id,
+      email: lead_email,
+      lead_email,
+      matched_doctor_emails: [],
+      has_level2: false,
+      match_count: 0,
+      status: 'error',
+      error_message: 'Member cache is empty - run POST /cache/rebuild'
+    });
+  }
+  console.log(`Loaded ${members.length} members from cache`);
 
   // Get existing matches for this lead to exclude
   const existingMatches = await getExistingMatches(bdClient, lead_id);
   const excludeUserIds = new Set(existingMatches.map(m => m.user_id));
   console.log(`Excluding ${excludeUserIds.size} existing matches`);
 
-  // Filter to eligible, active members with valid coordinates
+  // Bounding box for fast geographic pre-filter (avoids haversine on distant members)
+  const minLat = leadLat - BBOX_PADDING_DEG;
+  const maxLat = leadLat + BBOX_PADDING_DEG;
+  const minLng = leadLng - BBOX_PADDING_DEG;
+  const maxLng = leadLng + BBOX_PADDING_DEG;
+
+  // Filter to eligible, active members within bounding box
   const eligibleMembers = members.filter(m => {
     // Must be active
     if (m.active !== '2' && m.active !== '1') return false;
 
-    // Must have eligible plan
+    // Must be Level 2+ plan
     const planId = String(m.subscription_id);
-    if (!ALL_ELIGIBLE_PLANS.includes(planId)) return false;
+    if (!LEVEL2_PLANS.includes(planId)) return false;
 
     // Must have valid coordinates
     const memberLat = parseFloat(m.lat);
     const memberLon = parseFloat(m.lon);
     if (!isValidCoordinate(memberLat, memberLon)) return false;
+
+    // Bounding box pre-filter (fast, avoids haversine on most members)
+    if (memberLat < minLat || memberLat > maxLat) return false;
+    if (memberLon < minLng || memberLon > maxLng) return false;
 
     // Must not already be matched to this lead
     if (excludeUserIds.has(String(m.user_id))) return false;
@@ -348,44 +417,34 @@ async function handleCascade(payload, env, ctx) {
     return true;
   });
 
-  console.log(`${eligibleMembers.length} eligible members after filtering`);
+  console.log(`${eligibleMembers.length} members in bounding box after filtering`);
 
-  // Calculate distances and filter to radius
+  // Calculate exact distances using haversine (now on smaller subset)
   const membersWithDistance = eligibleMembers.map(m => {
     const memberLat = parseFloat(m.lat);
     const memberLon = parseFloat(m.lon);
     const distance = haversineDistance(leadLat, leadLng, memberLat, memberLon);
-    const planId = String(m.subscription_id);
 
     return {
       user_id: m.user_id,
       email: m.email,
       first_name: m.first_name,
       last_name: m.last_name,
-      plan_id: planId,
-      is_level2: LEVEL2_PLANS.includes(planId),
+      plan_id: String(m.subscription_id),
       distance_miles: distance
     };
   }).filter(m => m.distance_miles <= RADIUS_MILES);
 
-  console.log(`${membersWithDistance.length} members within ${RADIUS_MILES} miles`);
+  console.log(`${membersWithDistance.length} Level 2+ members within ${RADIUS_MILES} miles`);
 
   // Sort by distance (nearest first)
   membersWithDistance.sort((a, b) => a.distance_miles - b.distance_miles);
 
-  // Apply selection rule
-  let selectedMembers = [];
-  const level2InRange = membersWithDistance.filter(m => m.is_level2);
+  // Select exactly ONE Level 2+ member (nearest)
+  const selectedMembers = membersWithDistance.slice(0, 1);
 
-  if (level2InRange.length > 0) {
-    // Level 2+ available: select EXACTLY ONE (nearest)
-    selectedMembers = [level2InRange[0]];
-    console.log(`Selected 1 Level 2+ member: ${level2InRange[0].email}`);
-  } else {
-    // No Level 2+: select up to 5 Annual/Unverified
-    const annualInRange = membersWithDistance.filter(m => !m.is_level2);
-    selectedMembers = annualInRange.slice(0, 5);
-    console.log(`Selected ${selectedMembers.length} Annual/Unverified members`);
+  if (selectedMembers.length > 0) {
+    console.log(`Selected Level 2+ member: ${selectedMembers[0].email}`);
   }
 
   // No doctors in range
@@ -423,11 +482,10 @@ async function handleCascade(payload, env, ctx) {
   }
 
   // Success - notify each matched doctor (one POST per doctor)
-  await sendDoctorNotices(env.DOCTOR_NOTICE_WEBHOOK_URL, lead_id, emailsToMatch);
+  await sendDoctorNotices(env.DOCTOR_NOTICE_WEBHOOK_URL, lead_id, selectedMembers);
 
   // Send callback to GHL
-  const hasLevel2 = selectedMembers.some(m => m.is_level2);
-
+  // All matched doctors are Level 2+ (only tier eligible for cascade)
   const result = {
     lead_id,
     email: lead_email,
@@ -437,9 +495,9 @@ async function handleCascade(payload, env, ctx) {
       email: m.email,
       name: `${m.first_name} ${m.last_name}`.trim(),
       distance_miles: Math.round(m.distance_miles * 10) / 10,
-      tier: m.is_level2 ? 'level2' : 'annual'
+      tier: 'level2'
     })),
-    has_level2: hasLevel2,
+    has_level2: true,
     match_count: selectedMembers.length,
     status: 'matched'
   };
@@ -450,32 +508,95 @@ async function handleCascade(payload, env, ctx) {
 }
 
 /**
- * Get members with caching
+ * Get members from KV cache ONLY - never crawls BD inline
+ * Returns null if cache is empty/expired
  */
-async function getCachedMembers(bdClient, env, ctx) {
-  // Check KV cache if available
-  if (env.MEMBER_CACHE) {
-    const cached = await env.MEMBER_CACHE.get('all_members', { type: 'json' });
-    if (cached) {
-      console.log('Using cached member list');
-      return cached;
-    }
+async function getCachedMembers(env) {
+  if (!env.MEMBER_CACHE) {
+    console.error('MEMBER_CACHE KV namespace not bound');
+    return null;
   }
 
-  // Fetch from BD API
-  console.log('Fetching member list from BD API');
+  const cached = await env.MEMBER_CACHE.get('all_members', { type: 'json' });
+  if (cached) {
+    console.log(`Using cached member list (${cached.length} members)`);
+    return cached;
+  }
+
+  console.error('Member cache is empty or expired - cascade cannot proceed');
+  return null;
+}
+
+/**
+ * Rebuild member cache from BD API (used by cron and manual trigger)
+ */
+async function rebuildMemberCache(env) {
+  if (!env.MEMBER_CACHE) {
+    throw new Error('MEMBER_CACHE KV namespace not bound');
+  }
+
+  const bdClient = new BDClient(env.BD_API_KEY);
+  console.log('Fetching member list from BD API...');
   const members = await bdClient.getAllMembers();
+  console.log(`Fetched ${members.length} members from BD API`);
 
-  // Cache for next time
-  if (env.MEMBER_CACHE) {
-    ctx.waitUntil(
-      env.MEMBER_CACHE.put('all_members', JSON.stringify(members), {
-        expirationTtl: MEMBER_CACHE_TTL
-      })
-    );
+  await env.MEMBER_CACHE.put('all_members', JSON.stringify(members), {
+    expirationTtl: MEMBER_CACHE_TTL
+  });
+
+  console.log(`Cached ${members.length} members with TTL ${MEMBER_CACHE_TTL}s`);
+  return members.length;
+}
+
+/**
+ * Handle POST /cache/rebuild - Manual cache rebuild
+ */
+async function handleCacheRebuild(env) {
+  try {
+    const count = await rebuildMemberCache(env);
+    return new Response(JSON.stringify({
+      status: 'success',
+      member_count: count,
+      ttl_seconds: MEMBER_CACHE_TTL
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  } catch (error) {
+    console.error('Cache rebuild failed:', error.message);
+    return new Response(JSON.stringify({
+      status: 'error',
+      error: error.message
+    }), {
+      status: 500,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  }
+}
+
+/**
+ * Handle GET /cache/status - Check cache status
+ */
+async function handleCacheStatus(env) {
+  if (!env.MEMBER_CACHE) {
+    return new Response(JSON.stringify({
+      status: 'error',
+      error: 'MEMBER_CACHE not bound'
+    }), {
+      status: 500,
+      headers: { 'Content-Type': 'application/json' }
+    });
   }
 
-  return members;
+  const cached = await env.MEMBER_CACHE.get('all_members', { type: 'json' });
+  return new Response(JSON.stringify({
+    status: 'ok',
+    cached: cached !== null,
+    member_count: cached ? cached.length : 0
+  }), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' }
+  });
 }
 
 /**
@@ -499,32 +620,33 @@ async function getExistingMatches(bdClient, leadId) {
 /**
  * Send doctor notice to each matched doctor (one POST per doctor)
  */
-async function sendDoctorNotices(webhookUrl, lead_id, doctorEmails) {
+async function sendDoctorNotices(webhookUrl, lead_id, doctors) {
   if (!webhookUrl) {
     console.log('No doctor notice webhook URL configured, skipping');
     return;
   }
 
-  if (!doctorEmails || doctorEmails.length === 0) {
+  if (!doctors || doctors.length === 0) {
     return;
   }
 
-  console.log(`Sending doctor notices for lead ${lead_id} to ${doctorEmails.length} doctors`);
+  console.log(`Sending doctor notices for lead ${lead_id} to ${doctors.length} doctors`);
 
-  for (const doctorEmail of doctorEmails) {
+  for (const doctor of doctors) {
     try {
-      const response = await fetch(webhookUrl, {
+      const response = await fetchWithTimeout(webhookUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          email: doctorEmail,
+          email: doctor.email,
+          first_name: doctor.first_name || '',
           lead_id: lead_id
         })
       });
 
-      console.log(`Doctor notice to ${doctorEmail}: ${response.status}`);
+      console.log(`Doctor notice to ${doctor.email}: ${response.status}`);
     } catch (error) {
-      console.error(`Doctor notice to ${doctorEmail} failed:`, error);
+      console.error(`Doctor notice to ${doctor.email} failed:`, error.message);
     }
   }
 }
@@ -539,7 +661,7 @@ async function sendGHLCallback(webhookUrl, data) {
   }
 
   try {
-    const response = await fetch(webhookUrl, {
+    const response = await fetchWithTimeout(webhookUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data)
@@ -551,7 +673,7 @@ async function sendGHLCallback(webhookUrl, data) {
       console.log('GHL callback sent successfully');
     }
   } catch (error) {
-    console.error('GHL callback error:', error);
+    console.error('GHL callback error:', error.message);
   }
 
   return data;

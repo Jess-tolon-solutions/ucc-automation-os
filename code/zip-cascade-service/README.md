@@ -30,28 +30,27 @@ JSON API for GHL workflow integration.
 1. **Input**: GET /reroute (patient click) or POST / (GHL webhook)
 2. **Fetch members**: Pull all BD members (cached for 24 hours)
 3. **Filter by distance**: Haversine calculation, keep members within 50 miles
-4. **Exclude existing matches**: Don't re-match to doctors already on this lead
-5. **Selection rule**:
-   - If any Level 2+ doctors in range → match **exactly 1** (nearest)
-   - Otherwise → match up to **5 Annual/Unverified** (nearest first)
-6. **Match via BD API**: POST /api/v2/leads/match
-7. **Callback to GHL**: Report results so GHL can update the opportunity
-8. **Response**: HTML page (GET) or JSON (POST)
+4. **Filter by tier**: Only Level 2+ doctors (plans 2, 18, 19, 23, 26, 27, 29, 33)
+5. **Exclude existing matches**: Don't re-match to doctors already on this lead
+6. **Selection**: Match **exactly 1** Level 2+ doctor (nearest)
+7. **Match via BD API**: POST /api/v2/leads/match
+8. **Callback to GHL**: Report results so GHL can update the opportunity
+9. **Response**: HTML page (GET) or JSON (POST)
 
-## Why Level 2+ Gets Only One Match
+## Why Only Level 2+
 
-Level 2+ doctors receive full patient info immediately (auto-accept). If we matched
-5 Level 2+ doctors, all 5 practices would call the same patient. That's a bad patient
-experience. One doctor = one call.
+Level 2+ doctors receive full patient info immediately (auto-accept). The cascade
+is designed for patients who need a quick connection — matching them to a Level 2+
+doctor means immediate contact without the $50 accept/decline delay.
 
-Annual/Unverified doctors must pay $50 to accept, so only serious interest responds.
-Matching up to 5 is fine.
+Annual/Unverified doctors (plans 3, 31) are excluded from the cascade. They require
+the patient to wait for a paid acceptance, which defeats the purpose of the reroute.
 
 ## Why `has_level2` Matters
 
 When a Level 2+ doctor is auto-matched, BD does NOT fire an accept/decline webhook.
 GHL would never know the patient was connected. The worker reports `has_level2: true`
-so GHL can:
+(always true when a match is found) so GHL can:
 - Mark the opportunity as Accepted
 - Stop the patient waiting sequence
 - Skip the "we couldn't find anyone" email
@@ -194,10 +193,10 @@ curl -X POST http://localhost:8787 \
 
 ## Plan IDs
 
-**Level 2+** (full access, auto-accept):
+**Eligible for cascade (Level 2+, auto-accept):**
 - 2, 18, 19, 23, 26, 27, 29, 33
 
-**Annual/Unverified** ($50 accept/decline):
+**Not eligible (require $50 accept/decline):**
 - 3 (Unverified Doctor)
 - 31 (Level 1 Annual)
 
