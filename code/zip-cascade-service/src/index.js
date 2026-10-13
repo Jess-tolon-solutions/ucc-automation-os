@@ -529,6 +529,7 @@ async function getCachedMembers(env) {
 
 /**
  * Rebuild member cache from BD API (used by cron and manual trigger)
+ * Stores only fields needed for cascade to stay under KV 25MB limit
  */
 async function rebuildMemberCache(env) {
   if (!env.MEMBER_CACHE) {
@@ -540,12 +541,26 @@ async function rebuildMemberCache(env) {
   const members = await bdClient.getAllMembers();
   console.log(`Fetched ${members.length} members from BD API`);
 
-  await env.MEMBER_CACHE.put('all_members', JSON.stringify(members), {
+  // Trim to only fields needed for cascade (reduces ~28MB to ~200KB)
+  const slimMembers = members.map(m => ({
+    user_id: m.user_id,
+    email: m.email,
+    first_name: m.first_name || '',
+    lat: m.lat,
+    lon: m.lon,
+    subscription_id: m.subscription_id,
+    active: m.active
+  }));
+
+  const payload = JSON.stringify(slimMembers);
+  console.log(`Slim payload size: ${(payload.length / 1024).toFixed(1)} KB`);
+
+  await env.MEMBER_CACHE.put('all_members', payload, {
     expirationTtl: MEMBER_CACHE_TTL
   });
 
-  console.log(`Cached ${members.length} members with TTL ${MEMBER_CACHE_TTL}s`);
-  return members.length;
+  console.log(`Cached ${slimMembers.length} members with TTL ${MEMBER_CACHE_TTL}s`);
+  return slimMembers.length;
 }
 
 /**
